@@ -19,17 +19,22 @@ FilterBlockBuilder::FilterBlockBuilder(const FilterPolicy* policy)
     : policy_(policy) {
 }
 
-void FilterBlockBuilder::StartBlock(uint64_t block_offset) {
+void FilterBlockBuilder::StartBlock(uint64_t block_offset) { 
+  // 计算当前的filter下标
   uint64_t filter_index = (block_offset / kFilterBase);
   assert(filter_index >= filter_offsets_.size());
+  // 当前的filter下标 大于 已经存在的filter，则逐个补充创建
   while (filter_index > filter_offsets_.size()) {
     GenerateFilter();
   }
 }
 
+// 对当前filter操作(1个filter对应一个)
 void FilterBlockBuilder::AddKey(const Slice& key) {
   Slice k = key;
+  // key在keys开始的位置
   start_.push_back(keys_.size());
+  // 所有key无缝拼接到keys_中
   keys_.append(k.data(), k.size());
 }
 

@@ -25,11 +25,18 @@ class PosixLogger : public Logger {
   virtual ~PosixLogger() {
     fclose(file_);
   }
-  virtual void Logv(const char* format, va_list ap) {
+
+  // 特点：使用栈上内存和堆上内存来处理,提升性能
+  //      1.如果消息比较短，使用栈上内存就可以处理
+  //      2.如果消息比较长，先用栈上，然后用堆上内存
+  // 通过双缓存，代码能够高效、灵活地处理不同大小的日志输出，确保完整性与性能的平衡
+  virtual void Logv(const char* format, va_list ap/*可变参数列表,由vsnprintf格式化*/) {
+    // 当前线程id
     const uint64_t thread_id = (*gettid_)();
 
     // We try twice: the first time with a fixed-size stack allocated buffer,
     // and the second time with a much larger dynamically allocated buffer.
+    // 首先，栈上分配
     char buffer[500];
     for (int iter = 0; iter < 2; iter++) {
       char* base;
@@ -39,6 +46,7 @@ class PosixLogger : public Logger {
         base = buffer;
       } else {
         bufsize = 30000;
+        // 然后，堆上动态分配
         base = new char[bufsize];
       }
       char* p = base;

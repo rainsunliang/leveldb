@@ -45,12 +45,15 @@ Status WriteBatch::Iterate(Handler* handler) const {
     return Status::Corruption("malformed WriteBatch (too small)");
   }
 
+  // 将前面的8字节seqence + 4字节kv键值对数量移除(内部实现其实是数据的指针后移)
   input.remove_prefix(kHeader);
   Slice key, value;
   int found = 0;
   while (!input.empty()) {
     found++;
+    // 获取操作类型
     char tag = input[0];
+    // 移除操作类型
     input.remove_prefix(1);
     switch (tag) {
       case kTypeValue:
@@ -80,25 +83,34 @@ Status WriteBatch::Iterate(Handler* handler) const {
 }
 
 int WriteBatchInternal::Count(const WriteBatch* b) {
+  // 获取:从第8个位置开始，32位即4个字节是kv键值对的数量
   return DecodeFixed32(b->rep_.data() + 8);
 }
 
 void WriteBatchInternal::SetCount(WriteBatch* b, int n) {
+  // 设置:从第8个位置开始，32位即4个字节是kv键值对的数量
   EncodeFixed32(&b->rep_[8], n);
 }
 
 SequenceNumber WriteBatchInternal::Sequence(const WriteBatch* b) {
+  // 获取前面64位即8个自己上sequenceNumber
   return SequenceNumber(DecodeFixed64(b->rep_.data()));
 }
 
+// 整个writeBatch共用一个sequenceNumber，一个writeBatch是一个整体
 void WriteBatchInternal::SetSequence(WriteBatch* b, SequenceNumber seq) {
+  // 设置前面64位即8个自己上sequenceNumber
   EncodeFixed64(&b->rep_[0], seq);
 }
 
 void WriteBatch::Put(const Slice& key, const Slice& value) {
+  // 增加数量
   WriteBatchInternal::SetCount(this, WriteBatchInternal::Count(this) + 1);
+  // 增加操作类型为kTypeValue，代表数据更新
   rep_.push_back(static_cast<char>(kTypeValue));
+  // 将key序列化到内存中(前面自动添加长度)
   PutLengthPrefixedSlice(&rep_, key);
+  // 将value序列化到内存中(前面自动添加长度)
   PutLengthPrefixedSlice(&rep_, value);
 }
 
@@ -116,6 +128,7 @@ class MemTableInserter : public WriteBatch::Handler {
 
   virtual void Put(const Slice& key, const Slice& value) {
     mem_->Add(sequence_, kTypeValue, key, value);
+    // 每个table的sequence自增
     sequence_++;
   }
   virtual void Delete(const Slice& key) {

@@ -17,6 +17,8 @@ namespace leveldb {
 
 namespace {
 
+// 基于缓存的读写操作
+// 缓存通过std::vector<char*> blocks_实现，每个block的大小是kBlockSize=8k大小
 class FileState {
  public:
   // FileStates are reference counted. The initial reference count is zero
@@ -38,6 +40,7 @@ class FileState {
       --refs_;
       assert(refs_ >= 0);
       if (refs_ <= 0) {
+        // 互斥锁中只设置清除标识，不进行实际的delete操作提高效率
         do_delete = true;
       }
     }
@@ -54,6 +57,7 @@ class FileState {
       return Status::IOError("Offset greater than file size.");
     }
     const uint64_t available = size_ - offset;
+    // 校准读取的大小 不大于 能够读取的大小
     if (n > available) {
       n = available;
     }
@@ -62,9 +66,12 @@ class FileState {
       return Status::OK();
     }
 
+    // 计算block_数组的下标
     size_t block = offset / kBlockSize;
+    // 计算单个block字符串的偏移量
     size_t block_offset = offset % kBlockSize;
 
+    // 需要读取的数在单个block中，可以一次性读取
     if (n <= kBlockSize - block_offset) {
       // The requested bytes are all in the first block.
       *result = Slice(blocks_[block] + block_offset, n);
@@ -91,6 +98,7 @@ class FileState {
     return Status::OK();
   }
 
+  // 将数据加入到Buffer中,也就是blocks_中
   Status Append(const Slice& data) {
     const char* src = data.data();
     size_t src_len = data.size();
@@ -101,9 +109,11 @@ class FileState {
 
       if (offset != 0) {
         // There is some room in the last block.
+        // 上一个block还有avail大小的剩余空间
         avail = kBlockSize - offset;
       } else {
         // No room in the last block; push new one.
+        // 如果没有空间剩余则新建一个block
         blocks_.push_back(new char[kBlockSize]);
         avail = kBlockSize;
       }
@@ -111,6 +121,7 @@ class FileState {
       if (avail > src_len) {
         avail = src_len;
       }
+      // 数据写入blocks_
       memcpy(blocks_.back() + offset, src, avail);
       src_len -= avail;
       src += avail;

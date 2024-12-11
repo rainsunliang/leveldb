@@ -1319,7 +1319,7 @@ Status DBImpl::MakeRoomForWrite(bool force) {
       // There are too many level-0 files.
       Log(options_.info_log, "Too many L0 files; waiting...\n");
       bg_cv_.Wait();
-    } else {
+    } else { // log > 4M default
       // Attempt to switch to a new memtable and trigger compaction of old
       assert(versions_->PrevLogNumber() == 0);
       uint64_t new_log_number = versions_->NewFileNumber();

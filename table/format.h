@@ -19,11 +19,20 @@ struct ReadOptions;
 
 // BlockHandle is a pointer to the extent of a file that stores a data
 // block or a meta block.
+// BlockHandle 用于Footer中，指向meta block或index block
+// BlackHandle布局:
+//  -------------------------------
+//  |    Block Offset (varint64)  |                      
+//  -------------------------------
+//  |    Block Size   (varint64)  |                                              
+//  -------------------------------
+//  varint64最多10个字
+
 class BlockHandle {
  public:
   BlockHandle();
 
-  // The offset of the block in the file.
+  // The offset of the block in the file.(注意: offset是累加的总的偏移，包括了前面所有block的大小)
   uint64_t offset() const { return offset_; }
   void set_offset(uint64_t offset) { offset_ = offset; }
 
@@ -34,7 +43,7 @@ class BlockHandle {
   void EncodeTo(std::string* dst) const;
   Status DecodeFrom(Slice* input);
 
-  // Maximum encoding length of a BlockHandle
+  // Maximum encoding length of a BlockHandle (offset_和size_使用Varint64写，最差情况一个Varint64是10字节)
   enum { kMaxEncodedLength = 10 + 10 };
 
  private:
@@ -44,6 +53,25 @@ class BlockHandle {
 
 // Footer encapsulates the fixed information stored at the tail
 // end of every table file.
+// Flooter布局:
+//  ----------------------------------
+//  |  Meta Block Offset (varint64)  |                      
+//  ----------------------------------
+//  |  Meta Block Sizse  (varint64)  |                          
+//  ----------------------------------
+//  |  Index Block Offset(varint64)  |                          
+//  ----------------------------------
+//  |  Index Block Size  (varint64)  |                          
+//  ----------------------------------
+//  |     Padding Bytes(0~36)        |                     
+//  ----------------------------------
+//  |       Magic Number(8)          |         
+//  ----------------------------------
+//  因为varint最少1个字节，最多10个字节， Flooter固定48字节， 其中Magic Number固定8个字节
+//  因此: 48-8-10*4 <=  填充的字节数  <= 48-8-1*4, 即   0<=填充的字节数<=36
+//  
+//  Footer写的时机： TableBuilder::Finish
+//  Footer读的时机： Table::Open
 class Footer {
  public:
   Footer() { }
@@ -65,7 +93,7 @@ class Footer {
 
   // Encoded length of a Footer.  Note that the serialization of a
   // Footer will always occupy exactly this many bytes.  It consists
-  // of two block handles and a magic number.
+  // of two block handles(每个blockhandle 20字节 BlockHandle.kMaxEncodedLength ) and a magic number(8字节).
   enum {
     kEncodedLength = 2*BlockHandle::kMaxEncodedLength + 8
   };

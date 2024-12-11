@@ -10,7 +10,9 @@ namespace leveldb {
 
 const char* Status::CopyState(const char* state) {
   uint32_t size;
+  // 参考status.h对state_的内存结构说明,前面4个字节是message的长度
   memcpy(&size, state, sizeof(size));
+  // 申请内存
   char* result = new char[size + 5];
   memcpy(result, state, size + 5);
   return result;
@@ -20,6 +22,7 @@ Status::Status(Code code, const Slice& msg, const Slice& msg2) {
   assert(code != kOk);
   const uint32_t len1 = msg.size();
   const uint32_t len2 = msg2.size();
+  // 长度2为下面代码增加的字符": "
   const uint32_t size = len1 + (len2 ? (2 + len2) : 0);
   char* result = new char[size + 5];
   memcpy(result, &size, sizeof(size));

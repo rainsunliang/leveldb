@@ -34,32 +34,43 @@ Status Writer::AddRecord(const Slice& slice) {
   Status s;
   bool begin = true;
   do {
+    // 计算32KB的block剩余的空间
     const int leftover = kBlockSize - block_offset_;
     assert(leftover >= 0);
+    // 如果剩余空间不能够Header,将剩余空间填充为0
     if (leftover < kHeaderSize) {
       // Switch to a new block
       if (leftover > 0) {
         // Fill the trailer (literal below relies on kHeaderSize being 7)
         assert(kHeaderSize == 7);
+        // 剩余部分填充为0(最多7个,根据leftover的大小写)
         dest_->Append(Slice("\x00\x00\x00\x00\x00\x00", leftover));
       }
+      // 新开block,重置offset
       block_offset_ = 0;
     }
 
     // Invariant: we never leave < kHeaderSize bytes in a block.
     assert(kBlockSize - block_offset_ - kHeaderSize >= 0);
 
+    // 计算出去头部分,能够写数据的大小
     const size_t avail = kBlockSize - block_offset_ - kHeaderSize;
+    // 计算当前block需要写入的大小(考虑分段写的问题)
     const size_t fragment_length = (left < avail) ? left : avail;
 
     RecordType type;
+    // 如果剩余要写的大小等于分段写入的大小，说明可以写完
     const bool end = (left == fragment_length);
+    // 开始写 并写 写完了，也就是一次性写完
     if (begin && end) {
       type = kFullType;
+    // 分段写，写第一个fragment
     } else if (begin) {
       type = kFirstType;
+    // 分段写，写最后一个fragment
     } else if (end) {
       type = kLastType;
+    // 分段写，写中间的fragment
     } else {
       type = kMiddleType;
     }
@@ -77,6 +88,7 @@ Status Writer::EmitPhysicalRecord(RecordType t, const char* ptr, size_t n) {
   assert(block_offset_ + kHeaderSize + n <= kBlockSize);
 
   // Format the header
+  // checksum (4 bytes), length (2 bytes), type (1 byte). see log_format.h
   char buf[kHeaderSize];
   buf[4] = static_cast<char>(n & 0xff);
   buf[5] = static_cast<char>(n >> 8);
@@ -88,10 +100,11 @@ Status Writer::EmitPhysicalRecord(RecordType t, const char* ptr, size_t n) {
   EncodeFixed32(buf, crc);
 
   // Write the header and the payload
-  Status s = dest_->Append(Slice(buf, kHeaderSize));
+  Status s = dest_->Append(Slice(buf, kHeaderSize)); // 写header
   if (s.ok()) {
-    s = dest_->Append(Slice(ptr, n));
+    s = dest_->Append(Slice(ptr, n)); //写payload
     if (s.ok()) {
+      //TODO WAL file 每次立刻flush?
       s = dest_->Flush();
     }
   }

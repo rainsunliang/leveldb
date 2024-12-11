@@ -12,18 +12,21 @@
 // restart points, and can be used to do a binary search when looking
 // for a particular key.  Values are stored as-is (without compression)
 // immediately following the corresponding key.
+// 
+// 存储方案：
+//  1.key存储不同部分进行空间节省；而value部分不进行压缩
+//  2.block按group存储（也就是重启点restart），同一个group内的key跟本group第一个key对比，只存储差异的部分
+// An entry for a particular key-value pair has the form: （布局如下）
+//     shared_bytes: varint32    (跟本group第一个key相同的部分的长度)
+//     unshared_bytes: varint32  (跟本group第一个key不同的部分的长度)
+//     value_length: varint32    (value值的长度，value不压缩)
+//     key_delta: char[unshared_bytes] （value不同部分的数据内容）
+//     value: char[value_length] （value值具体的数据内容）
+// shared_bytes == 0 for restart points.  （对于restart point， 不压缩，所以shared_bytes == 0）
 //
-// An entry for a particular key-value pair has the form:
-//     shared_bytes: varint32
-//     unshared_bytes: varint32
-//     value_length: varint32
-//     key_delta: char[unshared_bytes]
-//     value: char[value_length]
-// shared_bytes == 0 for restart points.
-//
-// The trailer of the block has the form:
-//     restarts: uint32[num_restarts]
-//     num_restarts: uint32
+// The trailer of the block has the form: (block的尾部布局如下）
+//     restarts: uint32[num_restarts]  （restart数组，是一个offset，指向group的开始地址）
+//     num_restarts: uint32 （restart的数量）
 // restarts[i] contains the offset within the block of the ith restart point.
 
 #include "table/block_builder.h"

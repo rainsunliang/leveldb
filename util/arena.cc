@@ -39,10 +39,13 @@ char* Arena::AllocateFallback(size_t bytes) {
   return result;
 }
 
+// 对齐分配内存，可以提高访问效率等（cpu cache 避免跨cache）
 char* Arena::AllocateAligned(size_t bytes) {
   const int align = (sizeof(void*) > 8) ? sizeof(void*) : 8;
   assert((align & (align-1)) == 0);   // Pointer size should be a power of 2
+  // 地址对指针大小(比如8)取模，也就是取最后8位
   size_t current_mod = reinterpret_cast<uintptr_t>(alloc_ptr_) & (align-1);
+  // 按指针大小对齐,需要填充的大小 = 指针大小 - 地址的后8位的值
   size_t slop = (current_mod == 0 ? 0 : align - current_mod);
   size_t needed = bytes + slop;
   char* result;

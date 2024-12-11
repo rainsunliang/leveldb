@@ -17,6 +17,7 @@
 
 namespace leveldb {
 
+// TODO: 为什么Rep的声明要放到.cc文件中，而不是.h文件
 struct Table::Rep {
   ~Rep() {
     delete filter;
@@ -40,13 +41,14 @@ Status Table::Open(const Options& options,
                    uint64_t size,
                    Table** table) {
   *table = NULL;
-  if (size < Footer::kEncodedLength) {
+  if (size < Footer::kEncodedLength) { // Footer可以填充padding，是48个字节
     return Status::InvalidArgument("file is too short to be an sstable");
   }
 
   char footer_space[Footer::kEncodedLength];
   Slice footer_input;
-  Status s = file->Read(size - Footer::kEncodedLength, Footer::kEncodedLength,
+  // 读取开始位置为：size - Footer::kEncodedLength， 读取Footer::kEncodedLength=48个字节
+  Status s = file->Read(size - Footer::kEncodedLength, Footer::kEncodedLength, 
                         &footer_input, footer_space);
   if (!s.ok()) return s;
 

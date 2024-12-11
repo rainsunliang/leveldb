@@ -173,14 +173,19 @@ inline int InternalKeyComparator::Compare(
   return Compare(a.Encode(), b.Encode());
 }
 
+// 从internal_key解析出ParseInternalKey结构
 inline bool ParseInternalKey(const Slice& internal_key,
                              ParsedInternalKey* result) {
   const size_t n = internal_key.size();
   if (n < 8) return false;
+  // 获取最后8个字节
   uint64_t num = DecodeFixed64(internal_key.data() + n - 8);
+  // 获取8个字节中的最后一个字节，为type
   unsigned char c = num & 0xff;
+  // 右移获取前面7个字节为sequence
   result->sequence = num >> 8;
   result->type = static_cast<ValueType>(c);
+  // 前面的部分就是用户的key
   result->user_key = Slice(internal_key.data(), n - 8);
   return (c <= static_cast<unsigned char>(kTypeValue));
 }

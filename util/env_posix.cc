@@ -69,6 +69,7 @@ class PosixSequentialFile: public SequentialFile {
 };
 
 // pread() based random-access
+// pread支持seek某一个特定的offset后读取，即是random-access，而fread（PosixSequentialFile里的实现用到）是从头开始读取
 class PosixRandomAccessFile: public RandomAccessFile {
  private:
   std::string filename_;
@@ -175,6 +176,7 @@ class PosixMmapReadableFile: public RandomAccessFile {
   }
 };
 
+// WritableFile 接口声明式需要提供buffer管理,但是看当前版本实现并没有实现buffer相关的逻辑
 class PosixWritableFile : public WritableFile {
  private:
   std::string filename_;
@@ -215,7 +217,9 @@ class PosixWritableFile : public WritableFile {
     return Status::OK();
   }
 
+  // 将Manifest文件刷入磁盘
   Status SyncDirIfManifest() {
+    // case：/data/leveldb/MANIFEST
     const char* f = filename_.c_str();
     const char* sep = strrchr(f, '/');
     Slice basename;
@@ -224,7 +228,9 @@ class PosixWritableFile : public WritableFile {
       dir = ".";
       basename = f;
     } else {
+      // case: dir = "/data/leveldb"
       dir = std::string(f, sep - f);
+      // case：basename = "MANIFEST"
       basename = sep + 1;
     }
     Status s;
@@ -421,13 +427,13 @@ class PosixEnv : public Env {
     int fd = open(fname.c_str(), O_RDWR | O_CREAT, 0644);
     if (fd < 0) {
       result = IOError(fname, errno);
-    } else if (!locks_.Insert(fname)) {
+    } else if (!locks_.Insert(fname)) { // 这里使用locks_,避免了同一个进程重入的情况(重复获取锁)
       close(fd);
       result = Status::IOError("lock " + fname, "already held by process");
     } else if (LockOrUnlock(fd, true) == -1) {
       result = IOError("lock " + fname, errno);
       close(fd);
-      locks_.Remove(fname);
+      locks_.Remove(fname);·
     } else {
       PosixFileLock* my_lock = new PosixFileLock;
       my_lock->fd_ = fd;
@@ -559,6 +565,7 @@ void PosixEnv::BGThread() {
     // Wait until there is an item that is ready to run
     PthreadCall("lock", pthread_mutex_lock(&mu_));
     while (queue_.empty()) {
+      // wait的特点是：unlock -> wait  -> lock 即被唤醒后会尝试pthread_mutex_lock(&mu_)
       PthreadCall("wait", pthread_cond_wait(&bgsignal_, &mu_));
     }
 

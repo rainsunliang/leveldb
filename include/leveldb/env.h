@@ -207,7 +207,7 @@ class RandomAccessFile {
 };
 
 // A file abstraction for sequential writing.  The implementation
-// must provide buffering since callers may append small fragments
+// must provide buffering since callers may append small fragments(复数:多个fragment)
 // at a time to the file.
 class WritableFile {
  public:
@@ -270,6 +270,7 @@ extern Status ReadFileToString(Env* env, const std::string& fname,
 // An implementation of Env that forwards all calls to another Env.
 // May be useful to clients who wish to override just part of the
 // functionality of another Env.
+// 代理设计模式
 class EnvWrapper : public Env {
  public:
   // Initialize an EnvWrapper that delegates all calls to *t

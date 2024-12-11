@@ -15,23 +15,33 @@
 
 namespace leveldb {
 
+// 读取Restart的个数：最后4个字节
 inline uint32_t Block::NumRestarts() const {
   assert(size_ >= sizeof(uint32_t));
   return DecodeFixed32(data_ + size_ - sizeof(uint32_t));
 }
 
+/**
+ * 从BlockContents中解析出对应的ke数据和retart数据，
+ * 并提供迭代去进行kv数据的遍历操作
+ * 
+ */
 Block::Block(const BlockContents& contents)
     : data_(contents.data.data()),
       size_(contents.data.size()),
       owned_(contents.heap_allocated) {
   if (size_ < sizeof(uint32_t)) {
+    // 至少需要4个字节,用于记录restart的个数,否则意味数据错误
     size_ = 0;  // Error marker
   } else {
+    // 如果所有的空间都用于记录restart个数,计算出最多可以有多少个restart
     size_t max_restarts_allowed = (size_-sizeof(uint32_t)) / sizeof(uint32_t);
     if (NumRestarts() > max_restarts_allowed) {
       // The size is too small for NumRestarts()
+      // 从restart个数字段读取的个数大于所有空间都用于存储restar的(最大)个数，意味着数据错误
       size_ = 0;
     } else {
+      // restart的偏移量为size_ - 最后4个字节(代表restart个数) - restart个数*4(每个restart是一个指向具体key的4字节偏移量)
       restart_offset_ = size_ - (1 + NumRestarts()) * sizeof(uint32_t);
     }
   }

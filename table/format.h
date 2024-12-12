@@ -53,7 +53,8 @@ class BlockHandle {
 
 // Footer encapsulates the fixed information stored at the tail
 // end of every table file.
-// Flooter布局:
+// Footer是每个table文件的尾部
+// Footer布局:
 //  ----------------------------------
 //  |  Meta Block Offset (varint64)  |                      
 //  ----------------------------------

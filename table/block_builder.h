@@ -40,12 +40,12 @@ class BlockBuilder {
   }
 
  private:
-  const Options*        options_;
-  std::string           buffer_;      // Destination buffer
-  std::vector<uint32_t> restarts_;    // Restart points
-  int                   counter_;     // Number of entries emitted since restart
+  const Options*        options_;     // 选项，比如重启点options_->block_restart_interval等
+  std::string           buffer_;      // Destination buffer  序列化之后的数据
+  std::vector<uint32_t> restarts_;    // Restart points 重启点数组
+  int                   counter_;     // Number of entries emitted since restart  重启点后的entry(key-value)数量
   bool                  finished_;    // Has Finish() been called?
-  std::string           last_key_;
+  std::string           last_key_;    // 上一次的key
 
   // No copying allowed
   BlockBuilder(const BlockBuilder&);

@@ -97,6 +97,7 @@ void TableBuilder::Add(const Slice& key, const Slice& value) {
     assert(r->options.comparator->Compare(key, Slice(r->last_key)) > 0);
   }
 
+  // 写index block
   if (r->pending_index_entry) {
     assert(r->data_block.empty());
     r->options.comparator->FindShortestSeparator(&r->last_key, key);
@@ -106,15 +107,18 @@ void TableBuilder::Add(const Slice& key, const Slice& value) {
     r->pending_index_entry = false;
   }
 
+  // 写filter block
   if (r->filter_block != NULL) {
     r->filter_block->AddKey(key);
   }
 
+  // 写data block
   r->last_key.assign(key.data(), key.size());
   r->num_entries++;
   r->data_block.Add(key, value);
 
   const size_t estimated_block_size = r->data_block.CurrentSizeEstimate();
+  // 超过block阈值，需要开启新的block
   if (estimated_block_size >= r->options.block_size) {
     Flush();
   }

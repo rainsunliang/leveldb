@@ -26,6 +26,19 @@ class FilterPolicy;
 //
 // The sequence of calls to FilterBlockBuilder must match the regexp:
 //      (StartBlock AddKey*)* Finish
+// |-----------------------------------------------|
+// |                filter data                    |
+// |-----------------------------------------------|
+// |                filter1 offset(4B)             | 
+// |-----------------------------------------------|
+// |                filter2 offset(4B)             | 
+// |-----------------------------------------------|
+// |                filterN offset(4B)             | 
+// |-----------------------------------------------|
+// |                filter count(4B)               | 
+// |-----------------------------------------------|
+// |                kFilterBaseLg=2KB              |
+// |-----------------------------------------------|
 class FilterBlockBuilder {
  public:
   explicit FilterBlockBuilder(const FilterPolicy*);
@@ -42,7 +55,7 @@ class FilterBlockBuilder {
   std::vector<size_t> start_;     // Starting index in keys_ of each key
   std::string result_;            // Filter data computed so far
   std::vector<Slice> tmp_keys_;   // policy_->CreateFilter() argument
-  std::vector<uint32_t> filter_offsets_;
+  std::vector<uint32_t> filter_offsets_; // 对应每个fiter在result_的位置
 
   // No copying allowed
   FilterBlockBuilder(const FilterBlockBuilder&);

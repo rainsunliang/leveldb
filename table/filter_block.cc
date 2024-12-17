@@ -29,7 +29,7 @@ void FilterBlockBuilder::StartBlock(uint64_t block_offset) {
   }
 }
 
-// 对当前filter操作(1个filter对应一个)
+// 将当前key暂存到keys_中,后续在FilterBlockBuilder::Finish的时候会
 void FilterBlockBuilder::AddKey(const Slice& key) {
   Slice k = key;
   // key在keys开始的位置
@@ -39,6 +39,7 @@ void FilterBlockBuilder::AddKey(const Slice& key) {
 }
 
 Slice FilterBlockBuilder::Finish() {
+  // 当前有key则进入创建filter数据流程
   if (!start_.empty()) {
     GenerateFilter();
   }
@@ -46,24 +47,35 @@ Slice FilterBlockBuilder::Finish() {
   // Append array of per-filter offsets
   const uint32_t array_offset = result_.size();
   for (size_t i = 0; i < filter_offsets_.size(); i++) {
+    // 将每个filter在result_中的开始位置也写入到result_
     PutFixed32(&result_, filter_offsets_[i]);
   }
 
+  // 写入总的fitler数到result_
   PutFixed32(&result_, array_offset);
+  // 写入参数filterbase到result_
   result_.push_back(kFilterBaseLg);  // Save encoding parameter in result
   return Slice(result_);
 }
 
+// 为当前集合keys_所有的key创建fiter数据放到result_中
 void FilterBlockBuilder::GenerateFilter() {
+  // 获取当前key的数量
   const size_t num_keys = start_.size();
+
+  // 如果当前没有key
   if (num_keys == 0) {
     // Fast path if there are no keys for this filter
+    // 因为result_和filter_offsets_是累计的
     filter_offsets_.push_back(result_.size());
     return;
   }
 
+  // 如果当前有key，则走下面流程
+
   // Make list of keys from flattened key structure
   start_.push_back(keys_.size());  // Simplify length computation
+  // tmp_keys_扩展到num_keys字节，准备从key_和start_还原出数据放到tmp_keys中
   tmp_keys_.resize(num_keys);
   for (size_t i = 0; i < num_keys; i++) {
     const char* base = keys_.data() + start_[i];
@@ -72,7 +84,9 @@ void FilterBlockBuilder::GenerateFilter() {
   }
 
   // Generate filter for current set of keys and append to result_.
+  // 记录新的fiter在result_的开始位置
   filter_offsets_.push_back(result_.size());
+  // 为当前集合keys_所有的key构建一个fiter数据，并写入到result_中
   policy_->CreateFilter(&tmp_keys_[0], num_keys, &result_);
 
   tmp_keys_.clear();

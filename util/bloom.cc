@@ -34,6 +34,7 @@ class BloomFilterPolicy : public FilterPolicy {
 
   virtual void CreateFilter(const Slice* keys, int n, std::string* dst) const {
     // Compute bloom filter size (in both bits and bytes)
+    // 当前前filter的大小是根据key的计算的
     size_t bits = n * bits_per_key_;
 
     // For small n, we can see a very high false positive rate.  Fix it

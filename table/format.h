@@ -109,7 +109,7 @@ class Footer {
 // and taking the leading 64 bits.
 static const uint64_t kTableMagicNumber = 0xdb4775248b80fb57ull;
 
-// 1-byte type + 32-bit crc
+// 1-byte type(压缩类型) + 32-bit crc
 static const size_t kBlockTrailerSize = 5;
 
 struct BlockContents {

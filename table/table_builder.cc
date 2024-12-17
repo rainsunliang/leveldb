@@ -97,12 +97,17 @@ void TableBuilder::Add(const Slice& key, const Slice& value) {
     assert(r->options.comparator->Compare(key, Slice(r->last_key)) > 0);
   }
 
-  // 写index block
+  // 写index block（上一block数据刚刷入盘会设置pending_index_entry=true）
   if (r->pending_index_entry) {
     assert(r->data_block.empty());
+    // 一个新的block,last_key如何设置？不一定就是key,而是使用了上一个block最后的key和当前key之间的一个字符串
+    // TODO：这种策略主要为了什么？
     r->options.comparator->FindShortestSeparator(&r->last_key, key);
     std::string handle_encoding;
+    // 记录文件的offset和size到handle_encoding
     r->pending_handle.EncodeTo(&handle_encoding);
+    // 写index block，其中key为last_key, value为文件的offset和size
+    // 因为index_block的block_restart_interval默认为1，index_block.Add不会key的共享部分和非共享部分分别存储的策略
     r->index_block.Add(r->last_key, Slice(handle_encoding));
     r->pending_index_entry = false;
   }
@@ -130,9 +135,11 @@ void TableBuilder::Flush() {
   if (!ok()) return;
   if (r->data_block.empty()) return;
   assert(!r->pending_index_entry);
+  // 将data block写入文件
   WriteBlock(&r->data_block, &r->pending_handle);
   if (ok()) {
     r->pending_index_entry = true;
+    // 执行文件flush到磁盘
     r->status = r->file->Flush();
   }
   if (r->filter_block != NULL) {
@@ -147,6 +154,7 @@ void TableBuilder::WriteBlock(BlockBuilder* block, BlockHandle* handle) {
   //    crc: uint32
   assert(ok());
   Rep* r = rep_;
+  // 增加restart到buffer_
   Slice raw = block->Finish();
 
   Slice block_contents;
@@ -182,15 +190,22 @@ void TableBuilder::WriteRawBlock(const Slice& block_contents,
   Rep* r = rep_;
   handle->set_offset(r->offset);
   handle->set_size(block_contents.size());
+  // 先将block的内容增加到文件
   r->status = r->file->Append(block_contents);
   if (r->status.ok()) {
     char trailer[kBlockTrailerSize];
+    // 1个字节的压缩类型
     trailer[0] = type;
+    // 计算数据部分的crc
     uint32_t crc = crc32c::Value(block_contents.data(), block_contents.size());
+    // crc也算上压缩类型这个字段
     crc = crc32c::Extend(crc, trailer, 1);  // Extend crc to cover block type
+    // tailer最后4个字节写入crc
     EncodeFixed32(trailer+1, crc32c::Mask(crc));
+    // 将尾部（压缩类型+crc）增加到文件
     r->status = r->file->Append(Slice(trailer, kBlockTrailerSize));
     if (r->status.ok()) {
+      // 更新整个文件的offet
       r->offset += block_contents.size() + kBlockTrailerSize;
     }
   }

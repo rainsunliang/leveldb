@@ -27,7 +27,8 @@ class BytewiseComparatorImpl : public Comparator {
   }
 
   // 找两个字符中的分隔符(分割字符串符合: 在排序时在start和limit之间)
-  // 例子： start = "applepie"  limit = "applezoo"
+  // 例子： start = "applepie"  limit = "applezoo"，结果："appleq"
+  // 结果通过start返回
   virtual void FindShortestSeparator(
       std::string* start,
       const Slice& limit) const {

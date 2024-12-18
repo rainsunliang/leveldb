@@ -104,7 +104,7 @@ void BlockBuilder::Add(const Slice& key, const Slice& value) {
     }
   } else {
     // Restart compression
-    // 增加新的重启点
+    // 增加新的重启点（默认shared = 0）
     restarts_.push_back(buffer_.size());
     // 重置当前存储点的kv数量
     counter_ = 0;

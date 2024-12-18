@@ -20,6 +20,7 @@ void BlockHandle::EncodeTo(std::string* dst) const {
   PutVarint64(dst, size_);
 }
 
+// 读取后input会跳过已经读取的内容
 Status BlockHandle::DecodeFrom(Slice* input) {
   if (GetVarint64(input, &offset_) &&
       GetVarint64(input, &size_)) {
@@ -42,6 +43,7 @@ void Footer::EncodeTo(std::string* dst) const {
 }
 
 Status Footer::DecodeFrom(Slice* input) {
+  // 读取并验证magic
   const char* magic_ptr = input->data() + kEncodedLength - 8;
   const uint32_t magic_lo = DecodeFixed32(magic_ptr);
   const uint32_t magic_hi = DecodeFixed32(magic_ptr + 4);
@@ -50,14 +52,17 @@ Status Footer::DecodeFrom(Slice* input) {
   if (magic != kTableMagicNumber) {
     return Status::InvalidArgument("not an sstable (bad magic number)");
   }
-
+  // 读取metaindex_handle_
   Status result = metaindex_handle_.DecodeFrom(input);
   if (result.ok()) {
+    // 读取index_handle_
     result = index_handle_.DecodeFrom(input);
   }
   if (result.ok()) {
     // We skip over any leftover data (just padding for now) in "input"
     const char* end = magic_ptr + 8;
+    // input-data()这个时候指定padding byte的开始位置，input->size() 包括了剩下的padding byte加magic大小
+    // input->data() + input->size() - end 理论等于0，而end也是已经指向了文件的最末尾
     *input = Slice(end, input->data() + input->size() - end);
   }
   return result;

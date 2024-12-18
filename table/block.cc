@@ -22,7 +22,7 @@ inline uint32_t Block::NumRestarts() const {
 }
 
 /**
- * 从BlockContents中解析出对应的ke数据和retart数据，
+ * 从BlockContents中解析出对应的kv数据和restart数据，
  * 并提供迭代去进行kv数据的遍历操作
  * 
  */
@@ -41,7 +41,7 @@ Block::Block(const BlockContents& contents)
       // 从restart个数字段读取的个数大于所有空间都用于存储restar的(最大)个数，意味着数据错误
       size_ = 0;
     } else {
-      // restart的偏移量为size_ - 最后4个字节(代表restart个数) - restart个数*4(每个restart是一个指向具体key的4字节偏移量)
+      // restart的偏移量为size_ - [最后4个字节(代表restart个数) - restart个数]*4(每个restart是一个指向具体key的4字节偏移量)
       restart_offset_ = size_ - (1 + NumRestarts()) * sizeof(uint32_t);
     }
   }
@@ -60,6 +60,7 @@ Block::~Block() {
 //
 // If any errors are detected, returns NULL.  Otherwise, returns a
 // pointer to the key delta (just past the three decoded values).
+// 返回指向key差异的部分地址，每个kv的存储格式可以看block_builder.cc的add函数
 static inline const char* DecodeEntry(const char* p, const char* limit,
                                       uint32_t* shared,
                                       uint32_t* non_shared,
@@ -102,10 +103,12 @@ class Block::Iter : public Iterator {
   }
 
   // Return the offset in data_ just past the end of the current entry.
+  // 返回当前整个条目entry的大小，也就相当于下一个条目的offset
   inline uint32_t NextEntryOffset() const {
     return (value_.data() + value_.size()) - data_;
   }
 
+  // 获取指定index的restart的值，其指向一个拥有16(配置的间隔多少数据一个重启点)个kv的数据(组)
   uint32_t GetRestartPoint(uint32_t index) {
     assert(index < num_restarts_);
     return DecodeFixed32(data_ + restarts_ + index * sizeof(uint32_t));
@@ -172,6 +175,7 @@ class Block::Iter : public Iterator {
     } while (ParseNextKey() && NextEntryOffset() < original);
   }
 
+  // 先通过restarts二分查找到对应的组(region),然后在region中线性查找
   virtual void Seek(const Slice& target) {
     // Binary search in restart array to find the last restart point
     // with a key < target
@@ -181,13 +185,15 @@ class Block::Iter : public Iterator {
       uint32_t mid = (left + right + 1) / 2;
       uint32_t region_offset = GetRestartPoint(mid);
       uint32_t shared, non_shared, value_length;
-      const char* key_ptr = DecodeEntry(data_ + region_offset,
-                                        data_ + restarts_,
+      // 获取key中non_shared部分的地址
+      const char* key_ptr = DecodeEntry(data_ + region_offset,  // mid 对应的数据组(region)的开始位置
+                                        data_ + restarts_,      // restart数组的开始位置 
                                         &shared, &non_shared, &value_length);
       if (key_ptr == NULL || (shared != 0)) {
         CorruptionError();
         return;
       }
+      // 读取key中non_shared部分的字符串(每個region第一key的non_shared就是完整的key)
       Slice mid_key(key_ptr, non_shared);
       if (Compare(mid_key, target) < 0) {
         // Key at "mid" is smaller than "target".  Therefore all
@@ -201,6 +207,7 @@ class Block::Iter : public Iterator {
     }
 
     // Linear search (within restart block) for first key >= target
+    // 找到了对应的组(region)，在分组内线性查找
     SeekToRestartPoint(left);
     while (true) {
       if (!ParseNextKey()) {
@@ -246,13 +253,16 @@ class Block::Iter : public Iterator {
 
     // Decode next entry
     uint32_t shared, non_shared, value_length;
+    // 获取key中non_shared部分的地址
     p = DecodeEntry(p, limit, &shared, &non_shared, &value_length);
     if (p == NULL || key_.size() < shared) {
       CorruptionError();
       return false;
     } else {
       key_.resize(shared);
+      // 读取key的非共享部分
       key_.append(p, non_shared);
+      // 读取value
       value_ = Slice(p + non_shared, value_length);
       while (restart_index_ + 1 < num_restarts_ &&
              GetRestartPoint(restart_index_ + 1) < current_) {

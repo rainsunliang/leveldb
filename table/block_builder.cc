@@ -15,10 +15,10 @@
 // 
 // 存储方案：
 //  1.key存储不同部分进行空间节省；而value部分不进行压缩
-//  2.block按group存储（也就是重启点restart），同一个group内的key跟本group第一个key对比，只存储差异的部分
+//  2.block按group存储（也就是重启点restart），同一个group内的key跟本group上一个key对比，只存储差异的部分
 // An entry for a particular key-value pair has the form: （布局如下）
-//     shared_bytes: varint32    (跟本group第一个key相同的部分的长度)
-//     unshared_bytes: varint32  (跟本group第一个key不同的部分的长度)
+//     shared_bytes: varint32    (跟本group上一个key相同的部分的长度)
+//     unshared_bytes: varint32  (跟本group上一个key不同的部分的长度)
 //     value_length: varint32    (value值的长度，value不压缩)
 //     key_delta: char[unshared_bytes] （value不同部分的数据内容）
 //     value: char[value_length] （value值具体的数据内容）
@@ -66,14 +66,28 @@ size_t BlockBuilder::CurrentSizeEstimate() const {
 // 增加restart到buffer_
 Slice BlockBuilder::Finish() {
   // Append restart array
+  // 写restart的位置数组，每个位置为4B大小
   for (size_t i = 0; i < restarts_.size(); i++) {
     PutFixed32(&buffer_, restarts_[i]);
   }
+  // 写入restart的数量（4B）
   PutFixed32(&buffer_, restarts_.size());
   finished_ = true;
   return Slice(buffer_);
 }
 
+// kv对的存储方式如下：
+// |-----------------------------------------------|
+// |                 shared(4B)                    |
+// |-----------------------------------------------|
+// |                non_shared(4B)                 | 
+// |-----------------------------------------------|
+// |                value.size(4B)                 | 
+// |-----------------------------------------------|
+// |                key的非共享部分字符串            | 
+// |-----------------------------------------------|
+// |                value整个字符串                 | 
+// |-----------------------------------------------|
 void BlockBuilder::Add(const Slice& key, const Slice& value) {
   Slice last_key_piece(last_key_);
   assert(!finished_);

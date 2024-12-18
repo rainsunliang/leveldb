@@ -59,6 +59,7 @@ class BytewiseComparatorImpl : public Comparator {
     }
   }
 
+  //eg: "abc" -> "bbc"
   virtual void FindShortSuccessor(std::string* key) const {
     // Find first character that can be incremented
     size_t n = key->size();

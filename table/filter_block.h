@@ -20,6 +20,13 @@ namespace leveldb {
 
 class FilterPolicy;
 
+/***
+ *  FitlerBlock：
+ *  写入通过类：FilterBlockBuilder
+ *  读取通过类：FilterBlockReader
+ **/
+
+
 // A FilterBlockBuilder is used to construct all of the filters for a
 // particular Table.  It generates a single string which is stored as
 // a special block in the Table.
@@ -27,7 +34,8 @@ class FilterPolicy;
 // The sequence of calls to FilterBlockBuilder must match the regexp:
 //      (StartBlock AddKey*)* Finish
 // |-----------------------------------------------|
-// |                filter data                    |
+// |                  filter data                  |
+// |  （多个filter，通过下面的fiter offset定位）     |
 // |-----------------------------------------------|
 // |                filter1 offset(4B)             | 
 // |-----------------------------------------------|
@@ -35,9 +43,9 @@ class FilterPolicy;
 // |-----------------------------------------------|
 // |                filterN offset(4B)             | 
 // |-----------------------------------------------|
-// |                filter count(4B)               | 
+// |           filter1 offset 开始的位置(4B)        | 
 // |-----------------------------------------------|
-// |                kFilterBaseLg=2KB              |
+// |   kFilterBaseLg=11 代表每2^11 = 2KB 1个filter  |
 // |-----------------------------------------------|
 class FilterBlockBuilder {
  public:

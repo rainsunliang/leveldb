@@ -54,6 +54,7 @@ class ReverseKeyComparator : public Comparator {
     *start = Reverse(s);
   }
 
+  // eg: abc -> abd (将最后一个字符ASC码+1)
   virtual void FindShortSuccessor(std::string* key) const {
     std::string s = Reverse(*key);
     BytewiseComparator()->FindShortSuccessor(&s);

@@ -17,6 +17,11 @@ class Block;
 class RandomAccessFile;
 struct ReadOptions;
 
+/**
+ * Footer构成：2个BlockHandle + Padding Byte + Magic Number
+ * 下面Footer类有标注详细的布局信息
+ **/
+
 // BlockHandle is a pointer to the extent of a file that stores a data
 // block or a meta block.
 // BlockHandle 用于Footer中，指向meta block或index block

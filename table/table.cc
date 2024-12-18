@@ -41,7 +41,7 @@ Status Table::Open(const Options& options,
                    uint64_t size,
                    Table** table) {
   *table = NULL;
-  if (size < Footer::kEncodedLength) { // Footer可以填充padding，是48个字节
+  if (size < Footer::kEncodedLength) { // Footer可以填充padding，固定是48个字节
     return Status::InvalidArgument("file is too short to be an sstable");
   }
 
@@ -53,6 +53,7 @@ Status Table::Open(const Options& options,
   if (!s.ok()) return s;
 
   Footer footer;
+  // 解释Footer数据
   s = footer.DecodeFrom(&footer_input);
   if (!s.ok()) return s;
 
@@ -60,6 +61,7 @@ Status Table::Open(const Options& options,
   BlockContents contents;
   Block* index_block = NULL;
   if (s.ok()) {
+    // 读取唯一的index block
     s = ReadBlock(file, ReadOptions(), footer.index_handle(), &contents);
     if (s.ok()) {
       index_block = new Block(contents);
@@ -95,6 +97,7 @@ void Table::ReadMeta(const Footer& footer) {
   // it is an empty block.
   ReadOptions opt;
   BlockContents contents;
+  // 根据metaindex_handle读取metaindex block
   if (!ReadBlock(rep_->file, opt, footer.metaindex_handle(), &contents).ok()) {
     // Do not propagate errors since meta info is not needed for operation
     return;
@@ -104,6 +107,7 @@ void Table::ReadMeta(const Footer& footer) {
   Iterator* iter = meta->NewIterator(BytewiseComparator());
   std::string key = "filter.";
   key.append(rep_->options.filter_policy->Name());
+  // 从metaindex block中查找filer类型meta block对应的metaindex条目
   iter->Seek(key);
   if (iter->Valid() && iter->key() == Slice(key)) {
     ReadFilter(iter->value());

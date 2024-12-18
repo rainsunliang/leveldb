@@ -157,6 +157,7 @@ const char* GetVarint64Ptr(const char* p, const char* limit, uint64_t* value) {
   return NULL;
 }
 
+// 读取后,input会跳过已读的内容，这样方便继续读取后面的数据
 bool GetVarint64(Slice* input, uint64_t* value) {
   const char* p = input->data();
   const char* limit = p + input->size();

@@ -56,6 +56,7 @@ struct TableBuilder::Rep {
         filter_block(opt.filter_policy == NULL ? NULL
                      : new FilterBlockBuilder(opt.filter_policy)),
         pending_index_entry(false) {
+    // index block因为相邻的数据共性不大，没有必要做去重存储优化，重启点间隔默认设置为1
     index_block_options.block_restart_interval = 1;
   }
 };
@@ -97,22 +98,22 @@ void TableBuilder::Add(const Slice& key, const Slice& value) {
     assert(r->options.comparator->Compare(key, Slice(r->last_key)) > 0);
   }
 
-  // 写index block（上一block数据刚刷入盘会设置pending_index_entry=true）
+  // 记录index block（上一block数据刚刷入盘会设置pending_index_entry=true），也就是每个datablock 记录一条index block
+  // Tips：一个table只有1个index block, 但是有多个data block和filter block
   if (r->pending_index_entry) {
     assert(r->data_block.empty());
-    // 一个新的block,last_key如何设置？不一定就是key,而是使用了上一个block最后的key和当前key之间的一个字符串
-    // TODO：这种策略主要为了什么？
+    // 一个新的block,last_key不一定就等于当前key,而是使用了上一个block最后的key和当前key之间的一个字符串（这里叫做"最短分割符"）
     r->options.comparator->FindShortestSeparator(&r->last_key, key);
     std::string handle_encoding;
-    // 记录文件的offset和size到handle_encoding
+    // 记录文件当前的offset和size到handle_encoding
     r->pending_handle.EncodeTo(&handle_encoding);
-    // 写index block，其中key为last_key, value为文件的offset和size
-    // 因为index_block的block_restart_interval默认为1，index_block.Add不会key的共享部分和非共享部分分别存储的策略
+    // 写index block，其中key为last_key, value为data block(上一个)在文件的offset和size
+    // 因为index_block的block_restart_interval默认为1，index_block.Add不会根据key的共享部分和非共享部分分别存储的策略
     r->index_block.Add(r->last_key, Slice(handle_encoding));
     r->pending_index_entry = false;
   }
 
-  // 写filter block
+  // 记录filter block
   if (r->filter_block != NULL) {
     r->filter_block->AddKey(key);
   }
@@ -135,7 +136,7 @@ void TableBuilder::Flush() {
   if (!ok()) return;
   if (r->data_block.empty()) return;
   assert(!r->pending_index_entry);
-  // 将data block写入文件
+  // 将data block写入文件，同时将datablock在文件中的offset和data block的size记录到pending_handle
   WriteBlock(&r->data_block, &r->pending_handle);
   if (ok()) {
     r->pending_index_entry = true;
@@ -154,7 +155,7 @@ void TableBuilder::WriteBlock(BlockBuilder* block, BlockHandle* handle) {
   //    crc: uint32
   assert(ok());
   Rep* r = rep_;
-  // 增加restart到buffer_
+  // 增加restart增加到buffer_，并通过函数返回整个buffer_内容
   Slice raw = block->Finish();
 
   Slice block_contents;
@@ -184,6 +185,7 @@ void TableBuilder::WriteBlock(BlockBuilder* block, BlockHandle* handle) {
   block->Reset();
 }
 
+// handle参数可以获取到，当年前写入到文件中的offset和需要写入的文件大小
 void TableBuilder::WriteRawBlock(const Slice& block_contents,
                                  CompressionType type,
                                  BlockHandle* handle) {
@@ -202,12 +204,12 @@ void TableBuilder::WriteRawBlock(const Slice& block_contents,
     crc = crc32c::Extend(crc, trailer, 1);  // Extend crc to cover block type
     // tailer最后4个字节写入crc
     EncodeFixed32(trailer+1, crc32c::Mask(crc));
-    // 将尾部（压缩类型+crc）增加到文件
+    // 将block的尾部（压缩类型+crc）增加到文件-- 到此整个datablock已经写入文件
     r->status = r->file->Append(Slice(trailer, kBlockTrailerSize));
     if (r->status.ok()) {
       // 更新整个文件的offet
       r->offset += block_contents.size() + kBlockTrailerSize;
-    }
+    }  
   }
 }
 
@@ -215,55 +217,77 @@ Status TableBuilder::status() const {
   return rep_->status;
 }
 
+// 进行表Finish的时候
+// 1.刷入最后data block到文件（data block是每个block都会写入表的，其他的block是最后Finish的时候真正写入文件）
+// 2.写filter block到文件(多个。Tips: filter block是metablock的一种类型)
+// 3.写metaindex block(1个)
+// 4.写indx block(1个)
+// 5.写表表尾部（footer）
 Status TableBuilder::Finish() {
   Rep* r = rep_;
+  // 1.刷入最后的data block到文件
   Flush();
   assert(!r->closed);
   r->closed = true;
 
   BlockHandle filter_block_handle, metaindex_block_handle, index_block_handle;
 
-  // Write filter block
+  // Write filter block 
+  // 2.写所有的filter block到文件
   if (ok() && r->filter_block != NULL) {
+    // 2.1 r->filter_block->Finish()执行最后一个filter block写入，返回所有的filter block数据
+    // 2.2 执行WriteRawBlock，将filter block写入到文件; 同时将filter block在文件中的offset和size记录到了filter_block_handle中
     WriteRawBlock(r->filter_block->Finish(), kNoCompression,
                   &filter_block_handle);
   }
 
   // Write metaindex block
+  // 3.写metaindex block （当前更像是filter block的指针）
   if (ok()) {
     BlockBuilder meta_index_block(&r->options);
+
+    // 3.1 写策略名：比如 "filter.leveldb.BuiltinBloomFilter"
     if (r->filter_block != NULL) {
       // Add mapping from "filter.Name" to location of filter data
       std::string key = "filter.";
       key.append(r->options.filter_policy->Name());
       std::string handle_encoding;
       filter_block_handle.EncodeTo(&handle_encoding);
+      // key 为"filter.leveldb.BuiltinBloomFilter", value为在filter block的offset和size
       meta_index_block.Add(key, handle_encoding);
     }
 
     // TODO(postrelease): Add stats and other meta blocks
+    // 写metaindex block, 同时将metaindex block在文件中的offset和size记录到了metaindex_block_handle中
     WriteBlock(&meta_index_block, &metaindex_block_handle);
   }
 
   // Write index block
+  // 4.写index block
   if (ok()) {
+    // 4.1 写上一个data block对应的一条index记录
     if (r->pending_index_entry) {
+      // last_key的后续key, eg: abc -> abd
       r->options.comparator->FindShortSuccessor(&r->last_key);
       std::string handle_encoding;
       r->pending_handle.EncodeTo(&handle_encoding);
+      // value为datablock对应的handle
       r->index_block.Add(r->last_key, Slice(handle_encoding));
       r->pending_index_entry = false;
     }
+    // 4.2 写index block到文件(紧接着metaindex block)，同时index block在在文件中的offset和size记录到了index_block_handle
     WriteBlock(&r->index_block, &index_block_handle);
   }
 
   // Write footer
+  // 5.写表表尾部（footer）,由两部分组成：1.metaindex block的位置和大小信息 2.index block的位置和大小信息
   if (ok()) {
     Footer footer;
     footer.set_metaindex_handle(metaindex_block_handle);
     footer.set_index_handle(index_block_handle);
     std::string footer_encoding;
     footer.EncodeTo(&footer_encoding);
+    // 将foolter增加都文件尾部
     r->status = r->file->Append(footer_encoding);
     if (r->status.ok()) {
       r->offset += footer_encoding.size();

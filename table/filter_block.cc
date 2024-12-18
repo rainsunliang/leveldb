@@ -19,6 +19,9 @@ FilterBlockBuilder::FilterBlockBuilder(const FilterPolicy* policy)
     : policy_(policy) {
 }
 
+// 先建一个filter block,
+// 注意：所有的filter block因为是最后统一写到data block后面的，
+// 所以filter block的序列化数据会攒起来到filterblock的result_中
 void FilterBlockBuilder::StartBlock(uint64_t block_offset) { 
   // 计算当前的filter下标
   uint64_t filter_index = (block_offset / kFilterBase);
@@ -51,7 +54,7 @@ Slice FilterBlockBuilder::Finish() {
     PutFixed32(&result_, filter_offsets_[i]);
   }
 
-  // 写入总的fitler数到result_
+  // 写入所有fitler总的偏移到result_
   PutFixed32(&result_, array_offset);
   // 写入参数filterbase到result_
   result_.push_back(kFilterBaseLg);  // Save encoding parameter in result
@@ -103,21 +106,30 @@ FilterBlockReader::FilterBlockReader(const FilterPolicy* policy,
       base_lg_(0) {
   size_t n = contents.size();
   if (n < 5) return;  // 1 byte for base_lg_ and 4 for start of offset array
+  // 读取baselg
   base_lg_ = contents[n-1];
+  // 读取fitleroffset的数量（每个filter-data每2^base_lg_ KB数据对应一个filter)
   uint32_t last_word = DecodeFixed32(contents.data() + n - 5);
   if (last_word > n - 5) return;
   data_ = contents.data();
+  // offset_指向第1个filter offset的位置
   offset_ = data_ + last_word;
+  // filter offset数量 = （block总大小n - 1字节baselg - 4字节 fillter offset 开始位置）/ 4字节 每个一个 fillter offset 
   num_ = (n - 5 - last_word) / 4;
 }
 
+// 
 bool FilterBlockReader::KeyMayMatch(uint64_t block_offset, const Slice& key) {
+  // 通过block_offset计算落到哪个filter中（因为每2^base_lg_ KB data block数据，对应一个fiter）
   uint64_t index = block_offset >> base_lg_;
   if (index < num_) {
+    // 计算对应filter的开始和结束位置
     uint32_t start = DecodeFixed32(offset_ + index*4);
     uint32_t limit = DecodeFixed32(offset_ + index*4 + 4);
     if (start <= limit && limit <= (offset_ - data_)) {
+      // 从filter block的data_中提取对应filter数据
       Slice filter = Slice(data_ + start, limit - start);
+      // 判断对应的key是否在filter中有命中
       return policy_->KeyMayMatch(key, filter);
     } else if (start == limit) {
       // Empty filters do not match any keys

@@ -111,7 +111,9 @@ Status TableCache::Get(const ReadOptions& options,
   Cache::Handle* handle = NULL;
   Status s = FindTable(file_number, file_size, &handle);
   if (s.ok()) {
+    // 先找到对应table
     Table* t = reinterpret_cast<TableAndFile*>(cache_->Value(handle))->table;
+    // 从table中找到对应key
     s = t->InternalGet(options, k, arg, saver);
     cache_->Release(handle);
   }

@@ -175,7 +175,7 @@ class Block::Iter : public Iterator {
     } while (ParseNextKey() && NextEntryOffset() < original);
   }
 
-  // 先通过restarts二分查找到对应的组(region),然后在region中线性查找
+  // 先通过restarts二分查找到对应的组(region),然后在region中线性查找(注意：本接口是查找到结束，不直接返回结果，而是要通过判断Iter的状态来看是否有找到对应的key)
   virtual void Seek(const Slice& target) {
     // Binary search in restart array to find the last restart point
     // with a key < target

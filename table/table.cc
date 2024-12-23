@@ -223,7 +223,9 @@ Status Table::InternalGet(const ReadOptions& options, const Slice& k,
                           void* arg,
                           void (*saver)(void*, const Slice&, const Slice&)) {
   Status s;
+  // 构建index block的迭代器
   Iterator* iiter = rep_->index_block->NewIterator(rep_->options.comparator);
+  // 从table的众多index block中查找，值是一个block handler指向对应的data block
   iiter->Seek(k);
   if (iiter->Valid()) {
     Slice handle_value = iiter->value();
@@ -234,12 +236,16 @@ Status Table::InternalGet(const ReadOptions& options, const Slice& k,
         !filter->KeyMayMatch(handle.offset(), k)) {
       // Not found
     } else {
+      // 创建data block的迭代器： 通过对应data block的index
       Iterator* block_iter = BlockReader(this, options, iiter->value());
+      // 在data block中查找对应key
       block_iter->Seek(k);
       if (block_iter->Valid()) {
+        // 传入的调用hook函数
         (*saver)(arg, block_iter->key(), block_iter->value());
       }
       s = block_iter->status();
+
       delete block_iter;
     }
   }

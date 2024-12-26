@@ -36,6 +36,10 @@ class Table {
   // for the duration of the returned table's lifetime.
   //
   // *file must remain live while this Table is in use.
+  // 1.解析基础数据：Footer
+  // 2.解析index block
+  // 3.解析metaindex block
+  // 4.解析出filter block
   static Status Open(const Options& options,
                      RandomAccessFile* file,
                      uint64_t file_size,
@@ -57,7 +61,7 @@ class Table {
   uint64_t ApproximateOffsetOf(const Slice& key) const;
 
  private:
-  struct Rep;
+  struct Rep; // Representation缩写
   Rep* rep_;
 
   explicit Table(Rep* rep) { rep_ = rep; }
@@ -67,13 +71,19 @@ class Table {
   // to Seek(key).  May not make such a call if filter policy says
   // that key is not present.
   friend class TableCache;
+  // 根据key查找，如果查找到调用回调函数handle_result,如果过滤策略发现key不存在就不会回调
   Status InternalGet(
       const ReadOptions&, const Slice& key,
       void* arg,
       void (*handle_result)(void* arg, const Slice& k, const Slice& v));
 
 
+  // 1.根据footer(footer的mataindex_handle),读取metaindex block
+  // 2.在metaindex block查找fiter.xxxx meta的位置
+  // 3.根据fiter.xxxx meta的位置,读取对应的meta block(主要就是filter block)
   void ReadMeta(const Footer& footer);
+
+  
   void ReadFilter(const Slice& filter_handle_value);
 
   // No copying allowed

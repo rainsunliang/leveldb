@@ -17,7 +17,7 @@
 
 namespace leveldb {
 
-// TODO: 为什么Rep的声明要放到.cc文件中，而不是.h文件
+// Rep的声明放到.cc文件中，而没有放到.h文件，可减少编译依赖
 struct Table::Rep {
   ~Rep() {
     delete filter;
@@ -26,13 +26,19 @@ struct Table::Rep {
   }
 
   Options options;
+  // 状态
   Status status;
-  RandomAccessFile* file;
+  // 对应的文件
+  RandomAccessFile* file; 
+  // 对应的cahce_id
   uint64_t cache_id;
+  // filter block的读取器
   FilterBlockReader* filter;
+  // fiter数据
   const char* filter_data;
-
+  // 指向metaindex的位置
   BlockHandle metaindex_handle;  // Handle to metaindex_block: saved from footer
+  // index_block数据（只有一个index_block）
   Block* index_block;
 };
 
@@ -88,6 +94,9 @@ Status Table::Open(const Options& options,
   return s;
 }
 
+// 1.根据footer(footer的mataindex_handle),读取metaindex block
+// 2.在metaindex block查找fiter.xxxx meta的位置
+// 3.根据fiter.xxxx meta的位置,读取对应的meta block(主要就是filter block)
 void Table::ReadMeta(const Footer& footer) {
   if (rep_->options.filter_policy == NULL) {
     return;  // Do not need any metadata
@@ -110,12 +119,14 @@ void Table::ReadMeta(const Footer& footer) {
   // 从metaindex block中查找filer类型meta block对应的metaindex条目
   iter->Seek(key);
   if (iter->Valid() && iter->key() == Slice(key)) {
+    // 根据上面查找的位置读取对应的filter block数据
     ReadFilter(iter->value());
   }
   delete iter;
   delete meta;
 }
 
+// 根据Filter block的位置信息读取对应的fitler block数据，构建一个FilterBlockReader放到rep_->filter
 void Table::ReadFilter(const Slice& filter_handle_value) {
   Slice v = filter_handle_value;
   BlockHandle filter_handle;
@@ -157,6 +168,7 @@ static void ReleaseBlock(void* arg, void* h) {
 
 // Convert an index iterator value (i.e., an encoded BlockHandle)
 // into an iterator over the contents of the corresponding block.
+// 通过index的迭代器的值(Block Handle)，获取指向对应block的迭代器
 Iterator* Table::BlockReader(void* arg,
                              const ReadOptions& options,
                              const Slice& index_value) {
@@ -177,15 +189,19 @@ Iterator* Table::BlockReader(void* arg,
       char cache_key_buffer[16];
       EncodeFixed64(cache_key_buffer, table->rep_->cache_id);
       EncodeFixed64(cache_key_buffer+8, handle.offset());
+      // block_cache缓存的key为：cache_id(8B) +  block的offset
       Slice key(cache_key_buffer, sizeof(cache_key_buffer));
       cache_handle = block_cache->Lookup(key);
       if (cache_handle != NULL) {
+        // 命中缓存从缓存中获取block
         block = reinterpret_cast<Block*>(block_cache->Value(cache_handle));
       } else {
+        // 通过block的handle从table文件中读取对应的block
         s = ReadBlock(table->rep_->file, options, handle, &contents);
         if (s.ok()) {
           block = new Block(contents);
           if (contents.cachable && options.fill_cache) {
+            // 将block插入block cache中
             cache_handle = block_cache->Insert(
                 key, block, block->size(), &DeleteCachedBlock);
           }

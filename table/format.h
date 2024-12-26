@@ -119,8 +119,8 @@ static const size_t kBlockTrailerSize = 5;
 
 struct BlockContents {
   Slice data;           // Actual contents of data
-  bool cachable;        // True iff data can be cached
-  bool heap_allocated;  // True iff caller should delete[] data.data()
+  bool cachable;        // True iff data can be cached 如果数据完整，就可缓存
+  bool heap_allocated;  // True iff caller should delete[] data.data() 是否是分配在堆上
 };
 
 // Read the block identified by "handle" from "file".  On failure

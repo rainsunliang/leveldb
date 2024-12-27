@@ -91,10 +91,12 @@ extern void AppendInternalKey(std::string* result,
 // stores the parsed data in "*result", and returns true.
 //
 // On error, returns false, leaves "*result" in an undefined state.
+// 获取ParseInternalKey
 extern bool ParseInternalKey(const Slice& internal_key,
                              ParsedInternalKey* result);
 
 // Returns the user key portion of an internal key.
+// 获取UserKey
 inline Slice ExtractUserKey(const Slice& internal_key) {
   assert(internal_key.size() >= 8);
   return Slice(internal_key.data(), internal_key.size() - 8);
@@ -141,12 +143,24 @@ class InternalFilterPolicy : public FilterPolicy {
 // Modules in this directory should keep internal keys wrapped inside
 // the following class instead of plain strings so that we do not
 // incorrectly use string comparisons instead of an InternalKeyComparator.
+
+// 各种key的关系：
+// 1.internalkey编码的字节
+// 2.ParsedInternalKey是internalkey解码后对应的结构struct，有3个成员属性
+// |-------------------------|---------------------|-------------------|-------------|-------------------------|-----------------|
+// |  key_length(varint32)   |  user_key(string)   |   sequncnce(7B)   |  type(1B)   |  value_length(varint32) |  value(string)  | 
+// |-------------------------|---------------------|-------------------|-------------|-------------------------|-----------------|
+//                           ^-----------------------InternalKey---------------------^
+// ^---------------------------memtable key------------------------------------------^
+// |                         |                                                       |
+// start_                   kstart_                                                 end_
 class InternalKey {
  private:
   std::string rep_;
  public:
   InternalKey() { }   // Leave rep_ as empty to indicate it is invalid
   InternalKey(const Slice& user_key, SequenceNumber s, ValueType t) {
+    //将ParsedInternalKey序列化到rep_中
     AppendInternalKey(&rep_, ParsedInternalKey(user_key, s, t));
   }
 

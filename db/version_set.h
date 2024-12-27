@@ -61,6 +61,7 @@ class Version {
   // Append to *iters a sequence of iterators that will
   // yield the contents of this Version when merged together.
   // REQUIRES: This version has been saved (see VersionSet::SaveTo)
+  // 创建每一层的迭代器，其中第0层和非0层的迭代器不一样
   void AddIterators(const ReadOptions&, std::vector<Iterator*>* iters);
 
   // Lookup the value for key.  If found, store it in *val and
@@ -70,12 +71,14 @@ class Version {
     FileMetaData* seek_file;
     int seek_file_level;
   };
+  // 从SST读取指定key的数据
   Status Get(const ReadOptions&, const LookupKey& key, std::string* val,
              GetStats* stats);
 
   // Adds "stats" into the current state.  Returns true if a new
   // compaction may need to be triggered, false otherwise.
   // REQUIRES: lock is held
+  // 当查找文件miss则增加seek次数
   bool UpdateStats(const GetStats& stats);
 
   // Record a sample of bytes read at the specified internal key.
@@ -89,6 +92,7 @@ class Version {
   void Ref();
   void Unref();
 
+  // 获取指定层，与[begin, end]有重叠的SST列表
   void GetOverlappingInputs(
       int level,
       const InternalKey* begin,         // NULL means before all keys
@@ -99,12 +103,14 @@ class Version {
   // some part of [*smallest_user_key,*largest_user_key].
   // smallest_user_key==NULL represents a key smaller than all keys in the DB.
   // largest_user_key==NULL represents a key largest than all keys in the DB.
+  // 判断[smallest_user_key，largest_user_key]与指定层是否有重叠
   bool OverlapInLevel(int level,
                       const Slice* smallest_user_key,
                       const Slice* largest_user_key);
 
   // Return the level at which we should place a new memtable compaction
   // result that covers the range [smallest_user_key,largest_user_key].
+  // 选择内存table要写到哪一层
   int PickLevelForMemTableOutput(const Slice& smallest_user_key,
                                  const Slice& largest_user_key);
 
@@ -125,27 +131,28 @@ class Version {
   // false, makes no more calls.
   //
   // REQUIRES: user portion of internal_key == user_key.
+  // 查找key区间与user_key有重合的SST集合，逐个调用func函数
   void ForEachOverlapping(Slice user_key, Slice internal_key,
                           void* arg,
                           bool (*func)(void*, int, FileMetaData*));
 
-  VersionSet* vset_;            // VersionSet to which this Version belongs
+  VersionSet* vset_;            // VersionSet to which this Version belongs 属于哪个versionset
   Version* next_;               // Next version in linked list
   Version* prev_;               // Previous version in linked list
-  int refs_;                    // Number of live refs to this version
+  int refs_;                    // Number of live refs to this version 当前version的引用数
 
-  // List of files per level
-  std::vector<FileMetaData*> files_[config::kNumLevels];
+  // List of files per level 每层的文件列表
+  std::vector<FileMetaData*> files_[config::kNumLevels]; 
 
   // Next file to compact based on seek stats.
-  FileMetaData* file_to_compact_;
-  int file_to_compact_level_;
+  FileMetaData* file_to_compact_; // seek次数超过阈值后需要压缩的文件
+  int file_to_compact_level_;     // seek次数超过阈值后需要压缩的文件所在的层数
 
   // Level that should be compacted next and its compaction score.
   // Score < 1 means compaction is not strictly needed.  These fields
   // are initialized by Finalize().
-  double compaction_score_;
-  int compaction_level_;
+  double compaction_score_; // 用于检查size超过阈值后需要压缩的文件
+  int compaction_level_;    // 用于检查size超过阈值后需要压缩的文件所在的层数
 
   explicit Version(VersionSet* vset)
       : vset_(vset), next_(this), prev_(this), refs_(0),

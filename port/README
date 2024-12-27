@@ -8,3 +8,4 @@ that provides the platform specific implementation.
 See port_posix.h for an example of what must be provided in a platform
 specific header file.
 
+可以看到大部分开源项目，平台相关的代码都会放到一个叫port的目录下，port有移植的含义~

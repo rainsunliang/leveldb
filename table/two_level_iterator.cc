@@ -15,6 +15,8 @@ namespace {
 
 typedef Iterator* (*BlockFunction)(void*, const ReadOptions&, const Slice&);
 
+// 两层迭代器：1层 index_iter； 2层data_iter_
+// index_iter和data_iter_是Iter包装类IteratorWrapper，提供了缓存的能力
 class TwoLevelIterator: public Iterator {
  public:
   TwoLevelIterator(
@@ -60,6 +62,8 @@ class TwoLevelIterator: public Iterator {
   void SkipEmptyDataBlocksForward();
   void SkipEmptyDataBlocksBackward();
   void SetDataIterator(Iterator* data_iter);
+  // 初始化data_iter_
+  // 调用回调函数block_function_初始化index_iter_对应的data block inter
   void InitDataBlock();
 
   BlockFunction block_function_;
@@ -70,6 +74,9 @@ class TwoLevelIterator: public Iterator {
   IteratorWrapper data_iter_; // May be NULL
   // If data_iter_ is non-NULL, then "data_block_handle_" holds the
   // "index_value" passed to block_function_ to create the data_iter_.
+  // 如果data_iter_，通过block_function_(arg_, options_, handle)来创建
+  // 其中hande是index_iter_对应的value,如果创建OK后，并将hande赋值到data_block_handle_
+  // data_block_handle_的主要用于判断data_iter_是不是对应最新的index_iter_,不是的话初始化data_iter_
   std::string data_block_handle_;
 };
 
@@ -89,9 +96,13 @@ TwoLevelIterator::~TwoLevelIterator() {
 }
 
 void TwoLevelIterator::Seek(const Slice& target) {
+  // 找到对应的SST文件
   index_iter_.Seek(target);
+  // 初始化data block
   InitDataBlock();
+  // 在SST中搜索
   if (data_iter_.iter() != NULL) data_iter_.Seek(target);
+  //
   SkipEmptyDataBlocksForward();
 }
 
@@ -157,11 +168,15 @@ void TwoLevelIterator::InitDataBlock() {
   if (!index_iter_.Valid()) {
     SetDataIterator(NULL);
   } else {
+    // 获取data block的handle（即指向对应data block的offset）
     Slice handle = index_iter_.value();
     if (data_iter_.iter() != NULL && handle.compare(data_block_handle_) == 0) {
       // data_iter_ is already constructed with this iterator, so
       // no need to change anything
+      // 当前handle对应的data_iter_已经存在，不用再重复处理
     } else {
+      // data_iter为空 或者 当前的data_iter_跟handle不是对应的，则重新创建data_iter_
+      // 通过回调block_function_来创建
       Iterator* iter = (*block_function_)(arg_, options_, handle);
       data_block_handle_.assign(handle.data(), handle.size());
       SetDataIterator(iter);

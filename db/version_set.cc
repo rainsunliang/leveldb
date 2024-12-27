@@ -74,6 +74,9 @@ Version::~Version() {
   }
 }
 
+// 查找key对应的SST文件index
+// 目标：第一个满足最大key >= key的SST文件
+// eg：SST文件[2,5],[7,10],[20,25],需要查找8， 则返回第二SST的下标即 "1"
 int FindFile(const InternalKeyComparator& icmp,
              const std::vector<FileMetaData*>& files,
              const Slice& key) {
@@ -109,6 +112,7 @@ static bool BeforeFile(const Comparator* ucmp,
           ucmp->Compare(*user_key, f->smallest.user_key()) < 0);
 }
 
+// 判断是有存在SST文件的key区间跟指定的[smallest_user_key,largest_user_key]有重叠
 bool SomeFileOverlapsRange(
     const InternalKeyComparator& icmp,
     bool disjoint_sorted_files,
@@ -130,11 +134,12 @@ bool SomeFileOverlapsRange(
     return false;
   }
 
-  // Binary search over file list
+  // Binary search over file list 二分法查找
   uint32_t index = 0;
   if (smallest_user_key != NULL) {
     // Find the earliest possible internal key for smallest_user_key
-    InternalKey small(*smallest_user_key, kMaxSequenceNumber,kValueTypeForSeek);
+    InternalKey small(*smallest_user_key, kMaxSequenceNumber, kValueTypeForSeek);
+    // 先查找SST最大值大于目标最小值的SST文件
     index = FindFile(icmp, files, small.Encode());
   }
 
@@ -143,6 +148,8 @@ bool SomeFileOverlapsRange(
     return false;
   }
 
+  // 然后检查对应的SST的最小值是否大于当前要查找的最大largest_user_key，如果不大于则表示
+  // 对应的SST区间好查找的[smallest_user_key,largest_user_key]是有重叠的，返回true表明找到了对应的SST文件
   return !BeforeFile(ucmp, largest_user_key, files[index]);
 }
 
@@ -151,8 +158,11 @@ bool SomeFileOverlapsRange(
 // is the largest key that occurs in the file, and value() is an
 // 16-byte value containing the file number and file size, both
 // encoded using EncodeFixed64.
+// 对某一level(这里主要level>0)的SST文件的迭代器，即构造函数里的std::vector<FileMetaData*>遍历
 class Version::LevelFileNumIterator : public Iterator {
  public:
+  // InternalKeyComparator 比较器
+  // std::vector<FileMetaData*> 该level里面的FileMetaData数组
   LevelFileNumIterator(const InternalKeyComparator& icmp,
                        const std::vector<FileMetaData*>* flist)
       : icmp_(icmp),
@@ -679,18 +689,19 @@ class VersionSet::Builder {
 
       // We arrange to automatically compact this file after
       // a certain number of seeks.  Let's assume:
-      //   (1) One seek costs 10ms
-      //   (2) Writing or reading 1MB costs 10ms (100MB/s)
-      //   (3) A compaction of 1MB does 25MB of IO:
-      //         1MB read from this level
-      //         10-12MB read from next level (boundaries may be misaligned)
-      //         10-12MB written to next level
+      //   (1) One seek costs 10ms    25次seek等于25ms
+      //   (2) Writing or reading 1MB costs 10ms (100MB/s)  每1M的IO耗时等于10ms
+      //   (3) A compaction of 1MB does 25MB of IO:         每合并1M大概要做25M的IO(估算方式如下)，也就是耗时250ms
+      //         1MB read from this level      读文件该文件1M
+      //         10-12MB read from next level (boundaries may be misaligned) 从下一层中读取的大小10-12MB
+      //         10-12MB written to next level  写到下一次层的大小10-12MB
       // This implies that 25 seeks cost the same as the compaction
       // of 1MB of data.  I.e., one seek costs approximately the
-      // same as the compaction of 40KB of data.  We are a little
-      // conservative and allow approximately one seek for every 16KB
+      // same as the compaction of 40KB (1MB/25次seek) of data.  1次seek的成本相当于40KB数的compaction
+      // We are a little
+      // conservative and allow approximately one seek for every 16KB 保守估计：在触发compaciton之前每16KB允许一次1次seek
       // of data before triggering a compaction.
-      f->allowed_seeks = (f->file_size / 16384);
+      f->allowed_seeks = (f->file_size / 16384);  // 总的允许seeks(无效seek，即未命中的读次数)次数 = 文件大小/16KB
       if (f->allowed_seeks < 100) f->allowed_seeks = 100;
 
       levels_[level].deleted_files.erase(f->number);

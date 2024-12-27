@@ -22,29 +22,34 @@ Status BuildTable(const std::string& dbname,
                   FileMetaData* meta) {
   Status s;
   meta->file_size = 0;
+  // 跳到memtable的第一条kv记录
   iter->SeekToFirst();
 
   std::string fname = TableFileName(dbname, meta->number);
   if (iter->Valid()) {
     WritableFile* file;
+    // 新建文件
     s = env->NewWritableFile(fname, &file);
     if (!s.ok()) {
       return s;
     }
 
+    // 创建写表的Builder
     TableBuilder* builder = new TableBuilder(options, file);
-    meta->smallest.DecodeFrom(iter->key());
+    meta->smallest.DecodeFrom(iter->key()); // 更新元数据
+    // 遍历memtable的每条记录，add进进TableBuilder中，由其负责写入
     for (; iter->Valid(); iter->Next()) {
       Slice key = iter->key();
-      meta->largest.DecodeFrom(key);
+      meta->largest.DecodeFrom(key); // 更新元数据
       builder->Add(key, iter->value());
     }
 
     // Finish and check for builder errors
     if (s.ok()) {
+      // builder完成处理
       s = builder->Finish();
       if (s.ok()) {
-        meta->file_size = builder->FileSize();
+        meta->file_size = builder->FileSize(); // 更新元数据
         assert(meta->file_size > 0);
       }
     } else {
@@ -54,6 +59,7 @@ Status BuildTable(const std::string& dbname,
 
     // Finish and check for file errors
     if (s.ok()) {
+      // 刷磁盘
       s = file->Sync();
     }
     if (s.ok()) {

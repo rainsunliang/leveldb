@@ -42,6 +42,7 @@ TableCache::~TableCache() {
   delete cache_;
 }
 
+// 通过文件编号和大小，读取文件并插入缓存，返回对应的缓存项handle(现在很多语言会命名为Entry或者CacheNode)
 Status TableCache::FindTable(uint64_t file_number, uint64_t file_size,
                              Cache::Handle** handle) {
   Status s;
@@ -50,17 +51,23 @@ Status TableCache::FindTable(uint64_t file_number, uint64_t file_size,
   Slice key(buf, sizeof(buf));
   *handle = cache_->Lookup(key);
   if (*handle == NULL) { // 如果没有命中cache
-    std::string fname = TableFileName(dbname_, file_number);
+
+    // 打开文件创建一个可以随机读取的(指定位置读)的file:
+    // 先打开.ldb后缀文件，如果打开失败，尝试打开.sst后缀文件(中间版本文件后缀有变更过？兼容？)
+    std::string fname = TableFileName(dbname_, file_number); // 文件后缀.ldb
     RandomAccessFile* file = NULL;
     Table* table = NULL;
     s = env_->NewRandomAccessFile(fname, &file);
     if (!s.ok()) {
-      std::string old_fname = SSTTableFileName(dbname_, file_number);
+      std::string old_fname = SSTTableFileName(dbname_, file_number); // 文件后缀.stt
       if (env_->NewRandomAccessFile(old_fname, &file).ok()) {
         s = Status::OK();
       }
     }
+
+    // 如果文件存在，则Table从file中读取数据
     if (s.ok()) {
+      // 读取文件
       s = Table::Open(*options_, file, file_size, &table);
     }
 
@@ -73,6 +80,7 @@ Status TableCache::FindTable(uint64_t file_number, uint64_t file_size,
       TableAndFile* tf = new TableAndFile;
       tf->file = file;
       tf->table = table;
+      // 插入缓存
       *handle = cache_->Insert(key, tf, 1, &DeleteEntry);
     }
   }
@@ -88,11 +96,13 @@ Iterator* TableCache::NewIterator(const ReadOptions& options,
   }
 
   Cache::Handle* handle = NULL;
+  // 找到table文件在Cache中的CacheHandle(如果是LRUCache那就是LRUHandle)
   Status s = FindTable(file_number, file_size, &handle);
   if (!s.ok()) {
     return NewErrorIterator(s);
   }
 
+  // 通过CacheHandle获取Table，比如LRUHandle(CacheNode)的value就是表
   Table* table = reinterpret_cast<TableAndFile*>(cache_->Value(handle))->table;
   Iterator* result = table->NewIterator(options);
   result->RegisterCleanup(&UnrefEntry, cache_, handle);

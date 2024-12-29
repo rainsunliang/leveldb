@@ -36,6 +36,7 @@ static const int kL0_StopWritesTrigger = 12;
 // expensive manifest file operations.  We do not push all the way to
 // the largest level since that can generate a lot of wasted disk
 // space if the same key space is being repeatedly overwritten.
+// 比如key1推到了第7层，下一次更新被推到了第5层，下下次更新被推到了第3层，也就是key1会重复有多个版本，占用空间
 static const int kMaxMemCompactLevel = 2;
 
 // Approximate gap in bytes between samples of data read during iteration.

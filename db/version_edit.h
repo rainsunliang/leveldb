@@ -53,6 +53,7 @@ class VersionEdit {
     has_last_sequence_ = true;
     last_sequence_ = seq;
   }
+  // TODO: compation为什么是level和一个key就可以了
   void SetCompactPointer(int level, const InternalKey& key) {
     compact_pointers_.push_back(std::make_pair(level, key));
   }
@@ -87,10 +88,15 @@ class VersionEdit {
 
   typedef std::set< std::pair<int, uint64_t> > DeletedFileSet;
 
+  // 比较器名称
   std::string comparator_;
+  // 日志编号，该编号之前的数据可以删除
   uint64_t log_number_;
+  // 已经废弃
   uint64_t prev_log_number_;
+  // 下一个文件编号（ldb/idb/mainfest共享一个编号空间）
   uint64_t next_file_number_;
+  // 数据库已经持久化数据项中最大的squence number
   SequenceNumber last_sequence_;
   bool has_comparator_;
   bool has_log_number_;
@@ -98,8 +104,11 @@ class VersionEdit {
   bool has_next_file_number_;
   bool has_last_sequence_;
 
+  // compaction记录信息
   std::vector< std::pair<int, InternalKey> > compact_pointers_;
+  // 相对上一个version,需要删除的文件列表
   DeletedFileSet deleted_files_;
+  // 相对上一个version,新增的文件列表
   std::vector< std::pair<int, FileMetaData> > new_files_;
 };
 

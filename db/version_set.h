@@ -61,7 +61,9 @@ class Version {
   // Append to *iters a sequence of iterators that will
   // yield the contents of this Version when merged together.
   // REQUIRES: This version has been saved (see VersionSet::SaveTo)
-  // 创建每一层的迭代器，其中第0层和非0层的迭代器不一样
+  // 创建每一层的迭代器，其中第0层和非0层的迭代器不一样：
+  // 第0存在key重叠；全部读入cache缓存；
+  // 大于0层不存在key重叠,使用NewConcatenatingIterator,惰性读取；
   void AddIterators(const ReadOptions&, std::vector<Iterator*>* iters);
 
   // Lookup the value for key.  If found, store it in *val and
@@ -111,6 +113,10 @@ class Version {
   // Return the level at which we should place a new memtable compaction
   // result that covers the range [smallest_user_key,largest_user_key].
   // 选择内存table要写到哪一层
+  // dump 0层的时候，尽量选择一个level大的层，机制如下：
+  // 1. 如果放到对应的层数会导致文件间不严格有序，会影响读取，则不再尝试。
+  // 2. 如果放到 level + 1层，与 level + 2层的文件重叠很大，就会导致 compact 到该文件时，overlap文件过大，则不再尝试。
+  // 3. 最大返回 level 2
   int PickLevelForMemTableOutput(const Slice& smallest_user_key,
                                  const Slice& largest_user_key);
 
@@ -124,6 +130,7 @@ class Version {
   friend class VersionSet;
 
   class LevelFileNumIterator;
+  // 返回一个NewTwoLevelIterator
   Iterator* NewConcatenatingIterator(const ReadOptions&, int level) const;
 
   // Call func(arg, level, f) for every file that overlaps user_key in
@@ -186,20 +193,25 @@ class VersionSet {
       EXCLUSIVE_LOCKS_REQUIRED(mu);
 
   // Recover the last saved descriptor from persistent storage.
+  // 从持久化中恢复
   Status Recover();
 
   // Return the current version.
+  // 返回当前version
   Version* current() const { return current_; }
 
   // Return the current manifest file number
+  // 返回当前manifest文件编号
   uint64_t ManifestFileNumber() const { return manifest_file_number_; }
 
   // Allocate and return a new file number
+  // 分配新的文件编号
   uint64_t NewFileNumber() { return next_file_number_++; }
 
   // Arrange to reuse "file_number" unless a newer file number has
   // already been allocated.
   // REQUIRES: "file_number" was returned by a call to NewFileNumber().
+  // 复用文件号: 从file_number+1开始复用？
   void ReuseFileNumber(uint64_t file_number) {
     if (next_file_number_ == file_number + 1) {
       next_file_number_ = file_number;
@@ -235,12 +247,14 @@ class VersionSet {
   // Returns NULL if there is no compaction to be done.
   // Otherwise returns a pointer to a heap-allocated object that
   // describes the compaction.  Caller should delete the result.
+  // 选择参与压缩的level和文件
   Compaction* PickCompaction();
 
   // Return a compaction object for compacting the range [begin,end] in
   // the specified level.  Returns NULL if there is nothing in that
   // level that overlaps the specified range.  Caller should delete
   // the result.
+  // 获取制定level层，[begin, end]可以压缩的文件
   Compaction* CompactRange(
       int level,
       const InternalKey* begin,
@@ -248,13 +262,16 @@ class VersionSet {
 
   // Return the maximum overlapping data (in bytes) at next level for any
   // file at a level >= 1.
+  // 获取level+1层重叠部分的字节数
   int64_t MaxNextLevelOverlappingBytes();
 
   // Create an iterator that reads over the compaction inputs for "*c".
   // The caller should delete the iterator when no longer needed.
+  // 为参与压缩的文件创建一个迭代器
   Iterator* MakeInputIterator(Compaction* c);
 
   // Returns true iff some level needs a compaction.
+  // 判断是否需要压缩
   bool NeedsCompaction() const {
     Version* v = current_;
     return (v->compaction_score_ >= 1) || (v->file_to_compact_ != NULL);
@@ -262,10 +279,12 @@ class VersionSet {
 
   // Add all files listed in any live version to *live.
   // May also mutate some internal state.
+  
   void AddLiveFiles(std::set<uint64_t>* live);
 
   // Return the approximate offset in the database of the data for
   // "key" as of version "v".
+  // 获取该key近似的偏移量
   uint64_t ApproximateOffsetOf(Version* v, const InternalKey& key);
 
   // Return a human-readable short (single-line) summary of the number
@@ -304,16 +323,23 @@ class VersionSet {
   const Options* const options_;
   TableCache* const table_cache_;
   const InternalKeyComparator icmp_;
+  // 下一个文件编号
   uint64_t next_file_number_;
+  // manifest文件编号
   uint64_t manifest_file_number_;
   uint64_t last_sequence_;
+  // 当前日志编号
   uint64_t log_number_;
   uint64_t prev_log_number_;  // 0 or backing store for memtable being compacted
 
   // Opened lazily
+  // 写manifest的fd
   WritableFile* descriptor_file_;
+  // 写日志的fd
   log::Writer* descriptor_log_;
+  // 双向循环脸链表的表头
   Version dummy_versions_;  // Head of circular doubly-linked list of versions.
+  // 最新版本（dummy_versions_的pre指current）
   Version* current_;        // == dummy_versions_.prev_
 
   // Per-level key at which the next compaction at that level should start.

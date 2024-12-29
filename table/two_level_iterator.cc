@@ -74,9 +74,9 @@ class TwoLevelIterator: public Iterator {
   IteratorWrapper data_iter_; // May be NULL
   // If data_iter_ is non-NULL, then "data_block_handle_" holds the
   // "index_value" passed to block_function_ to create the data_iter_.
-  // 如果data_iter_，通过block_function_(arg_, options_, handle)来创建
+  // 如果data_iter_==NULL，通过block_function_(arg_, options_, handle)来创建
   // 其中hande是index_iter_对应的value,如果创建OK后，并将hande赋值到data_block_handle_
-  // data_block_handle_的主要用于判断data_iter_是不是对应最新的index_iter_,不是的话初始化data_iter_
+  // data_block_handle_的主要用于判断data_iter_是不是对与最新的index_iter_对应,不是的话初始化data_iter_
   std::string data_block_handle_;
 };
 

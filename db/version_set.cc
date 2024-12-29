@@ -20,11 +20,11 @@
 
 namespace leveldb {
 
-static const int kTargetFileSize = 2 * 1048576;
+static const int kTargetFileSize = 2 * 1048576; // 1MB
 
 // Maximum bytes of overlaps in grandparent (i.e., level+2) before we
 // stop building a single file in a level->level+1 compaction.
-static const int64_t kMaxGrandParentOverlapBytes = 10 * kTargetFileSize;
+static const int64_t kMaxGrandParentOverlapBytes = 10 * kTargetFileSize; // 20MB
 
 // Maximum number of bytes in all compacted files.  We avoid expanding
 // the lower level file set of a compaction if it would make the
@@ -115,26 +115,28 @@ static bool BeforeFile(const Comparator* ucmp,
 // 判断是有存在SST文件的key区间跟指定的[smallest_user_key,largest_user_key]有重叠
 bool SomeFileOverlapsRange(
     const InternalKeyComparator& icmp,
-    bool disjoint_sorted_files,
+    bool disjoint_sorted_files, // 0 层为false，其他层为true
     const std::vector<FileMetaData*>& files,
     const Slice* smallest_user_key,
     const Slice* largest_user_key) {
   const Comparator* ucmp = icmp.user_comparator();
+
+  // 如果是0层，因为有重叠，特殊处理
   if (!disjoint_sorted_files) {
     // Need to check against all files
     for (size_t i = 0; i < files.size(); i++) {
       const FileMetaData* f = files[i];
       if (AfterFile(ucmp, smallest_user_key, f) ||
           BeforeFile(ucmp, largest_user_key, f)) {
-        // No overlap
+        // No overlap 没有重叠
       } else {
-        return true;  // Overlap
+        return true;  // Overlap 有重叠
       }
     }
     return false;
   }
 
-  // Binary search over file list 二分法查找
+  // Binary search over file list 如果是非0层，因为重叠，且有序，二分法查找
   uint32_t index = 0;
   if (smallest_user_key != NULL) {
     // Find the earliest possible internal key for smallest_user_key
@@ -211,6 +213,7 @@ class Version::LevelFileNumIterator : public Iterator {
   mutable char value_buf_[16];
 };
 
+// 
 static Iterator* GetFileIterator(void* arg,
                                  const ReadOptions& options,
                                  const Slice& file_value) {
@@ -229,12 +232,13 @@ Iterator* Version::NewConcatenatingIterator(const ReadOptions& options,
                                             int level) const {
   return NewTwoLevelIterator(
       new LevelFileNumIterator(vset_->icmp_, &files_[level]),
-      &GetFileIterator, vset_->table_cache_, options);
+      &GetFileIterator, vset_->table_cache_, options); // 通过GetFileIterator生成data_iter_
 }
 
 void Version::AddIterators(const ReadOptions& options,
                            std::vector<Iterator*>* iters) {
   // Merge all level zero files together since they may overlap
+  // 第0存在key重叠；全部读入cache缓存；
   for (size_t i = 0; i < files_[0].size(); i++) {
     iters->push_back(
         vset_->table_cache_->NewIterator(
@@ -244,6 +248,7 @@ void Version::AddIterators(const ReadOptions& options,
   // For levels > 0, we can use a concatenating iterator that sequentially
   // walks through the non-overlapping files in the level, opening them
   // lazily.
+  // 大于0层不存在key重叠,使用NewConcatenatingIterator,惰性读取；
   for (int level = 1; level < config::kNumLevels; level++) {
     if (!files_[level].empty()) {
       iters->push_back(NewConcatenatingIterator(options, level));
@@ -285,6 +290,9 @@ static bool NewestFirst(FileMetaData* a, FileMetaData* b) {
   return a->number > b->number;
 }
 
+// 遍历所有跟user_key(inter_key)有重合的文件，进行State统计
+// 同一层只要遍历到第2个就会返回，这个是由func函数即传入的State::Match决定的
+// 因为只要回掉了两次，那就说明有多个文件，有无效调用?
 void Version::ForEachOverlapping(Slice user_key, Slice internal_key,
                                  void* arg,
                                  bool (*func)(void*, int, FileMetaData*)) {
@@ -292,18 +300,23 @@ void Version::ForEachOverlapping(Slice user_key, Slice internal_key,
   const Comparator* ucmp = vset_->icmp_.user_comparator();
 
   // Search level-0 in order from newest to oldest.
+  // 从0层开始搜索，从最新到旧搜索，因为0层是可能重叠的
   std::vector<FileMetaData*> tmp;
   tmp.reserve(files_[0].size());
   for (uint32_t i = 0; i < files_[0].size(); i++) {
     FileMetaData* f = files_[0][i];
+    // user_key 在SST的最小和最大key范围之间
     if (ucmp->Compare(user_key, f->smallest.user_key()) >= 0 &&
         ucmp->Compare(user_key, f->largest.user_key()) <= 0) {
+      // 记录零层所有范围符合的sst
       tmp.push_back(f);
     }
   }
-  if (!tmp.empty()) {
+  if (!tmp.empty()) { 
+    // 排序从新到旧，新的版本号更大
     std::sort(tmp.begin(), tmp.end(), NewestFirst);
     for (uint32_t i = 0; i < tmp.size(); i++) {
+      // 只要回调函数（State的Match函数 State::Match）返回false,则停止
       if (!(*func)(arg, 0, tmp[i])) {
         return;
       }
@@ -311,17 +324,23 @@ void Version::ForEachOverlapping(Slice user_key, Slice internal_key,
   }
 
   // Search other levels.
+  // 搜索非零层
   for (int level = 1; level < config::kNumLevels; level++) {
     size_t num_files = files_[level].size();
     if (num_files == 0) continue;
 
     // Binary search to find earliest index whose largest key >= internal_key.
+    // 因为本身不重叠且有序，可以二分查找(FindFile函数使用的是internal_key查找)
     uint32_t index = FindFile(vset_->icmp_, files_[level], internal_key);
     if (index < num_files) {
+      // 取出查找到的SST
       FileMetaData* f = files_[level][index];
+      // 比较user_key 和 sst的最小key
       if (ucmp->Compare(user_key, f->smallest.user_key()) < 0) {
         // All of "f" is past any data for user_key
+        // 如果user_key < 最小key，则说明没有查找到
       } else {
+        // 只要回调函数（State的Match函数 State::Match）返回false,则停止
         if (!(*func)(arg, level, f)) {
           return;
         }
@@ -432,8 +451,10 @@ Status Version::Get(const ReadOptions& options,
 bool Version::UpdateStats(const GetStats& stats) {
   FileMetaData* f = stats.seek_file;
   if (f != NULL) {
+    // 扣除次数
     f->allowed_seeks--;
     if (f->allowed_seeks <= 0 && file_to_compact_ == NULL) {
+      // 没有次数时，说明应该开始major merge了
       file_to_compact_ = f;
       file_to_compact_level_ = stats.seek_file_level;
       return true;
@@ -442,39 +463,50 @@ bool Version::UpdateStats(const GetStats& stats) {
   return false;
 }
 
+// 记录seek采样,主要逻辑如下
+// 1.通过ForEachOverlapping从0层开始，先找出范围跟inter_key重叠的SST文件集合
+// 2.回调State的Match函数，进行tate->matches++
+// 3.如果
 bool Version::RecordReadSample(Slice internal_key) {
   ParsedInternalKey ikey;
   if (!ParseInternalKey(internal_key, &ikey)) {
     return false;
   }
 
+  // 函数里面定义了一个结构体
   struct State {
-    GetStats stats;  // Holds first matching file
+    GetStats stats;  // Holds first matching file 记录第一个匹配的
     int matches;
 
     static bool Match(void* arg, int level, FileMetaData* f) {
       State* state = reinterpret_cast<State*>(arg);
-      state->matches++;
+      state->matches++; // 增加数量
       if (state->matches == 1) {
         // Remember first match.
+        // 只记录每层的第一个符合key范围包括了user_key的SST文件
         state->stats.seek_file = f;
         state->stats.seek_file_level = level;
       }
       // We can stop iterating once we have a second match.
+      // 只要 >= 2就返回false (这个时候ForEachOverlapping函数就会返回)
       return state->matches < 2;
     }
   };
 
   State state;
   state.matches = 0;
+  // 遍历所有跟user_key(inernal_key)有重叠的SST
   ForEachOverlapping(ikey.user_key, internal_key, &state, &State::Match);
 
   // Must have at least two matches since we want to merge across
   // files. But what if we have a single file that contains many
   // overwrites and deletions?  Should we have another mechanism for
   // finding such files?
+  // 只要有2个以上SST文件符合key范围跟user_key有重叠就进行该层第一个文件的seek数统计
+  // tips:其实这里最多==2，因为ForEachOverlapping调用State::Match返回false的时候它就返回了
   if (state.matches >= 2) {
     // 1MB cost is about 1 seek (see comment in Builder::Apply).
+    // 
     return UpdateStats(state.stats);
   }
   return false;
@@ -500,17 +532,26 @@ bool Version::OverlapInLevel(int level,
                                smallest_user_key, largest_user_key);
 }
 
+  // 选择内存table要写到哪一层
+  // dump 0层的时候，尽量选择一个level大的层，选择到level+1层的机制如下：
+  // 1.跟0层不能有重叠
+  // 2. 选择到level+1层，不能跟level+1层有重叠
+  // 3. 选择到level+1层，不能跟level+2层的文件重叠很大(超过20M)，就会导致大量的compact。
+  // 4. 最大返回 level 2，避免key在太多的层，有空间浪费，比如key1推到了第7层，下一次更新被推到了第5层，下下次更新被推到了第3层，也就是key1会重复有多个版本，占用空间
 int Version::PickLevelForMemTableOutput(
     const Slice& smallest_user_key,
     const Slice& largest_user_key) {
   int level = 0;
+  // 判断是否跟0层有重叠，如果跟0层有重复则直接返回0层
   if (!OverlapInLevel(0, &smallest_user_key, &largest_user_key)) {
     // Push to next level if there is no overlap in next level,
     // and the #bytes overlapping in the level after that are limited.
+    // 跟0层无重复，才考虑往更高层dump
     InternalKey start(smallest_user_key, kMaxSequenceNumber, kValueTypeForSeek);
     InternalKey limit(largest_user_key, 0, static_cast<ValueType>(0));
     std::vector<FileMetaData*> overlaps;
     while (level < config::kMaxMemCompactLevel) {
+      // 如果跟level+1层有重合，则不选择level+1层，停留在level层
       if (OverlapInLevel(level + 1, &smallest_user_key, &largest_user_key)) {
         break;
       }
@@ -518,6 +559,7 @@ int Version::PickLevelForMemTableOutput(
         // Check that file does not overlap too many grandparent bytes.
         GetOverlappingInputs(level + 2, &start, &limit, &overlaps);
         const int64_t sum = TotalFileSize(overlaps);
+        // 如果跟level+2层的文件重复大于20M，则不选择level+1层，停留在level层
         if (sum > kMaxGrandParentOverlapBytes) {
           break;
         }
@@ -551,16 +593,31 @@ void Version::GetOverlappingInputs(
     const Slice file_limit = f->largest.user_key();
     if (begin != NULL && user_cmp->Compare(file_limit, user_begin) < 0) {
       // "f" is completely before specified range; skip it
+      // 如果文件最大key < 用户的最小key，则说明没有重复
     } else if (end != NULL && user_cmp->Compare(file_start, user_end) > 0) {
       // "f" is completely after specified range; skip it
-    } else {
+      // 如果文件最小key > 用户的最大key，则说明没有重复
+    } else { // 区间有重复：有3种可能: 用户key[3,5] SST[2,6]; 用户key[3,5] SST[2,4]; 用户key[3,5] SST[4,6] 
+
+      // 举例：[1,2],[2,6],[2,4],[4,6],[5,7],[8,9],查找[3,5], 则结果为[1,2],[2,6],[2,4],[4,6],[5,7]
+      // 目的：找出SST范围和key有重叠的集合，然后也要包括和这个集合有重合的所有SST, 一直逐层扩散查找出所有有重叠的SST
+      // 1. i==0,user_being==3,user_end==5 => inputs=={}
+      // 2. i==1,user_begin==3,user_end==5 => user_begin = 2, user_end = 5，i = 0, inputs={}
+      // 3. i==0,user_begin==2,user_end==5 => user_begin = 1, user_end = 5，i = 0, inputs={}
+      // 5. i==0,user_begin==1,user_end==5 => i=1, inputs={[1,2]}
+      // 6. i==1,user_begin==1,user_end==5 => user_begin = 1, user_end = 6, i = 0, inputs={}
+      // 7. ...
+
       inputs->push_back(f);
       if (level == 0) {
         // Level-0 files may overlap each other.  So check if the newly
         // added file has expanded the range.  If so, restart search.
         if (begin != NULL && user_cmp->Compare(file_start, user_begin) < 0) {
+          // 将要搜索的begin key设置为：min(user_begin, file_start)
           user_begin = file_start;
+          // 清空
           inputs->clear();
+          // 设置i=0,重新搜索
           i = 0;
         } else if (end != NULL && user_cmp->Compare(file_limit, user_end) > 0) {
           user_end = file_limit;

@@ -38,6 +38,8 @@ class Cache {
   virtual ~Cache();
 
   // Opaque handle to an entry stored in the cache.
+  // 不透明的(模糊不确定的)Handle
+  // 比如在LRUCache中，这个Handle就是指向LRUHandle
   struct Handle { };
 
   // Insert a mapping from key->value into the cache and assign it

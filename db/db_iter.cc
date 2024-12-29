@@ -127,12 +127,16 @@ class DBIter: public Iterator {
   void operator=(const DBIter&);
 };
 
+// tips: 会跟据采样周期，确定是否统计seek次数
 inline bool DBIter::ParseKey(ParsedInternalKey* ikey) {
   Slice k = iter_->key();
   ssize_t n = k.size() + iter_->value().size();
   bytes_counter_ -= n;
+  // 如果 bytes_counter_ < key和value的总大小则命中采样
   while (bytes_counter_ < 0) {
+    // 重新初始化
     bytes_counter_ += RandomPeriod();
+    // 进入采样
     db_->RecordReadSample(k);
   }
   if (!ParseInternalKey(k, ikey)) {

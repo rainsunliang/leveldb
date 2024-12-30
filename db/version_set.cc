@@ -664,6 +664,7 @@ class VersionSet::Builder {
   struct BySmallestKey {
     const InternalKeyComparator* internal_comparator;
 
+    // 先比较最小key，如果相等再比较文件序号
     bool operator()(FileMetaData* f1, FileMetaData* f2) const {
       int r = internal_comparator->Compare(f1->smallest, f2->smallest);
       if (r != 0) {
@@ -675,15 +676,16 @@ class VersionSet::Builder {
     }
   };
 
+  // 有序的set，第2个参数为排序函数
   typedef std::set<FileMetaData*, BySmallestKey> FileSet;
   struct LevelState {
-    std::set<uint64_t> deleted_files;
-    FileSet* added_files;
+    std::set<uint64_t> deleted_files;  // 删除
+    FileSet* added_files; // 新增
   };
 
   VersionSet* vset_;
-  Version* base_;
-  LevelState levels_[config::kNumLevels];
+  Version* base_;  // 旧版本  base_ 加上 VersionEdit 生成新的版本
+  LevelState levels_[config::kNumLevels]; // 每层的新增和删除
 
  public:
   // Initialize a builder with the files from *base and other info from *vset
@@ -721,14 +723,15 @@ class VersionSet::Builder {
 
   // Apply all of the edits in *edit to the current state.
   void Apply(VersionEdit* edit) {
-    // Update compaction pointers
+    // Update compaction pointers  更新每层compact时开始的key
     for (size_t i = 0; i < edit->compact_pointers_.size(); i++) {
       const int level = edit->compact_pointers_[i].first;
       vset_->compact_pointer_[level] =
+          // 记录IternalKey
           edit->compact_pointers_[i].second.Encode().ToString();
     }
 
-    // Delete files
+    // Delete files 记录删除的文件
     const VersionEdit::DeletedFileSet& del = edit->deleted_files_;
     for (VersionEdit::DeletedFileSet::const_iterator iter = del.begin();
          iter != del.end();
@@ -780,7 +783,7 @@ class VersionSet::Builder {
       v->files_[level].reserve(base_files.size() + added->size());
       for (FileSet::const_iterator added_iter = added->begin();
            added_iter != added->end();
-           ++added_iter) {
+           ++added_iter) { //逐个遍历新加的文件
         // Add all smaller files listed in base_
         for (std::vector<FileMetaData*>::const_iterator bpos
                  = std::upper_bound(base_iter, base_end, *added_iter, cmp);
@@ -859,6 +862,7 @@ VersionSet::~VersionSet() {
   delete descriptor_file_;
 }
 
+// 双向链表中增加一个节点
 void VersionSet::AppendVersion(Version* v) {
   // Make "v" current
   assert(v->refs_ == 0);
@@ -891,10 +895,13 @@ Status VersionSet::LogAndApply(VersionEdit* edit, port::Mutex* mu) {
   edit->SetNextFile(next_file_number_);
   edit->SetLastSequence(last_sequence_);
 
+  // 将变更edit应用到current version, 生成一个新版本
   Version* v = new Version(this);
   {
     Builder builder(this, current_);
+    // 将变更edit应用到current version
     builder.Apply(edit);
+    // 生成一个新的版本v
     builder.SaveTo(v);
   }
   Finalize(v);

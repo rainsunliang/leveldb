@@ -316,6 +316,7 @@ class VersionSet {
   // Save current contents to *log
   Status WriteSnapshot(log::Writer* log);
 
+  // 增加一个版本
   void AppendVersion(Version* v);
 
   Env* const env_;

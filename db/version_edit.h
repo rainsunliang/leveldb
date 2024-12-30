@@ -86,7 +86,7 @@ class VersionEdit {
  private:
   friend class VersionSet;
 
-  typedef std::set< std::pair<int, uint64_t> > DeletedFileSet;
+  typedef std::set< std::pair<int/*level*/, uint64_t/*file number*/> > DeletedFileSet;
 
   // 比较器名称
   std::string comparator_;
@@ -105,11 +105,11 @@ class VersionEdit {
   bool has_last_sequence_;
 
   // compaction记录信息
-  std::vector< std::pair<int, InternalKey> > compact_pointers_;
+  std::vector< std::pair<int/*level*/, InternalKey> > compact_pointers_;
   // 相对上一个version,需要删除的文件列表
   DeletedFileSet deleted_files_;
   // 相对上一个version,新增的文件列表
-  std::vector< std::pair<int, FileMetaData> > new_files_;
+  std::vector< std::pair<int/*level*/, FileMetaData/*SST*/> > new_files_;
 };
 
 }  // namespace leveldb

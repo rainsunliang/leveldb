@@ -741,7 +741,7 @@ class VersionSet::Builder {
       levels_[level].deleted_files.insert(number);
     }
 
-    // Add new files
+    // Add new files 增加新文件
     for (size_t i = 0; i < edit->new_files_.size(); i++) {
       const int level = edit->new_files_[i].first;
       FileMetaData* f = new FileMetaData(edit->new_files_[i].second);
@@ -761,10 +761,14 @@ class VersionSet::Builder {
       // We are a little
       // conservative and allow approximately one seek for every 16KB 保守估计：在触发compaciton之前每16KB允许一次1次seek
       // of data before triggering a compaction.
+
+      // 初始化seeks数量
       f->allowed_seeks = (f->file_size / 16384);  // 总的允许seeks(无效seek，即未命中的读次数)次数 = 文件大小/16KB
       if (f->allowed_seeks < 100) f->allowed_seeks = 100;
 
+      // 从删除列表里剔除
       levels_[level].deleted_files.erase(f->number);
+      // 增加到新增列表里
       levels_[level].added_files->insert(f);
     }
   }
@@ -780,22 +784,28 @@ class VersionSet::Builder {
       std::vector<FileMetaData*>::const_iterator base_iter = base_files.begin();
       std::vector<FileMetaData*>::const_iterator base_end = base_files.end();
       const FileSet* added = levels_[level].added_files;
+      // 新增足够的空间
       v->files_[level].reserve(base_files.size() + added->size());
+      // 逐个遍历新加的文件
       for (FileSet::const_iterator added_iter = added->begin();
            added_iter != added->end();
-           ++added_iter) { //逐个遍历新加的文件
+           ++added_iter) {
         // Add all smaller files listed in base_
+        
+        // 1.先将原来base版本里面小于*added_iter的文件加入到v中
         for (std::vector<FileMetaData*>::const_iterator bpos
-                 = std::upper_bound(base_iter, base_end, *added_iter, cmp);
-             base_iter != bpos;
-             ++base_iter) {
+                 = std::upper_bound(base_iter, base_end, *added_iter, cmp); // 初始化为*added_iter的上界，比如{1,2,5,6},*added_iter=3,则bpos指向5
+             base_iter != bpos; // 从头遍历到上面这个上界的位置，比如这里是==5的时候就退出循环
+             ++base_iter) { // base_iter初始指向begin(),逐个遍历base_files
           MaybeAddFile(v, level, *base_iter);
         }
 
+        // 2.将新增的文件加入到
         MaybeAddFile(v, level, *added_iter);
       }
 
       // Add remaining base files
+      // 3.增加base_files里剩下的文件
       for (; base_iter != base_end; ++base_iter) {
         MaybeAddFile(v, level, *base_iter);
       }
@@ -821,6 +831,7 @@ class VersionSet::Builder {
   void MaybeAddFile(Version* v, int level, FileMetaData* f) {
     if (levels_[level].deleted_files.count(f->number) > 0) {
       // File is deleted: do nothing
+      // 已经删除的文件，不用做任何处理
     } else {
       std::vector<FileMetaData*>* files = &v->files_[level];
       if (level > 0 && !files->empty()) {
@@ -828,8 +839,8 @@ class VersionSet::Builder {
         assert(vset_->icmp_.Compare((*files)[files->size()-1]->largest,
                                     f->smallest) < 0);
       }
-      f->refs++;
-      files->push_back(f);
+      f->refs++; // 文件增加引用次数
+      files->push_back(f); // 文件加入新的版本v中level层
     }
   }
 };

@@ -1332,28 +1332,35 @@ Compaction* VersionSet::PickCompaction() {
 
   // We prefer compactions triggered by too much data in a level over
   // the compactions triggered by seeks.
+  // 基于文件大小合并
   const bool size_compaction = (current_->compaction_score_ >= 1);
+  // 基于seek次数合并
   const bool seek_compaction = (current_->file_to_compact_ != NULL);
-  if (size_compaction) {
+  
+  if (size_compaction) { // 优先基于文件大小合并
     level = current_->compaction_level_;
     assert(level >= 0);
     assert(level+1 < config::kNumLevels);
     c = new Compaction(level);
 
     // Pick the first file that comes after compact_pointer_[level]
+    // 选择compact_pointer_[level]记录的key后面的第一个文件开始(记录的是上一次commpact的地方，这样可以做到从上次compact的地方)
     for (size_t i = 0; i < current_->files_[level].size(); i++) {
       FileMetaData* f = current_->files_[level][i];
+      // 逐层查找，只要找到就结束查找到文件就结束
       if (compact_pointer_[level].empty() ||
           icmp_.Compare(f->largest.Encode(), compact_pointer_[level]) > 0) {
         c->inputs_[0].push_back(f);
         break;
       }
     }
+
+    // 如果上面没有选择到文件，则从该层的第1个文件开始
     if (c->inputs_[0].empty()) {
       // Wrap-around to the beginning of the key space
       c->inputs_[0].push_back(current_->files_[level][0]);
     }
-  } else if (seek_compaction) {
+  } else if (seek_compaction) { // 基于seek次数合并(作为补充策略)
     level = current_->file_to_compact_level_;
     c = new Compaction(level);
     c->inputs_[0].push_back(current_->file_to_compact_);
@@ -1362,50 +1369,66 @@ Compaction* VersionSet::PickCompaction() {
   }
 
   c->input_version_ = current_;
+  // 当前版本被Compaction引用，增加引用计数
   c->input_version_->Ref();
 
   // Files in level 0 may overlap each other, so pick up all overlapping ones
+  // 0层因为可能重叠，特殊处理，需要在0层选出所有跟c->inputs_[0]key范围重叠的SST文件
   if (level == 0) {
     InternalKey smallest, largest;
+    // 获取文件集合c->inputs_[0]中的最小key和最大key
     GetRange(c->inputs_[0], &smallest, &largest);
     // Note that the next call will discard the file we placed in
     // c->inputs_[0] earlier and replace it with an overlapping set
     // which will include the picked file.
+    // 在level 0中查找所有跟[smallest,largest]有重合的文件集合,结果直接替换到c->inputs_[0](出参)
     current_->GetOverlappingInputs(0, &smallest, &largest, &c->inputs_[0]);
     assert(!c->inputs_[0].empty());
   }
 
+  // 设置level+1层的输入文件
   SetupOtherInputs(c);
 
   return c;
 }
 
+// 设置level+1层的输入文件
 void VersionSet::SetupOtherInputs(Compaction* c) {
+  // 获取开始compacat的层号
   const int level = c->level();
   InternalKey smallest, largest;
+  // 获取level层的最小和最大key[smallest,largest]
   GetRange(c->inputs_[0], &smallest, &largest);
 
+  // 获取level+1层中跟[smallest,largest]有重合的文件列表放到c->inputs_[1]
   current_->GetOverlappingInputs(level+1, &smallest, &largest, &c->inputs_[1]);
 
   // Get entire range covered by compaction
+  // 获取输入文件：level和level+1层的key范围[all_start,all_limit]
   InternalKey all_start, all_limit;
   GetRange2(c->inputs_[0], c->inputs_[1], &all_start, &all_limit);
 
   // See if we can grow the number of inputs in "level" without
   // changing the number of "level+1" files we pick up.
+  // 看是否在level+1层文件没有变化的情况下，是否可以增加level层的文件(这样一次可处理更多的文件)
+  // 前提是：1.level+1层文件没有变化 2.参与压缩的总字节数小于阈值kExpandedCompactionByteSizeLimit 50MB
   if (!c->inputs_[1].empty()) {
     std::vector<FileMetaData*> expanded0;
+    // 通过[all_start,all_limit] 返回level层查找重叠的文件，作为输入
     current_->GetOverlappingInputs(level, &all_start, &all_limit, &expanded0);
     const int64_t inputs0_size = TotalFileSize(c->inputs_[0]);
     const int64_t inputs1_size = TotalFileSize(c->inputs_[1]);
     const int64_t expanded0_size = TotalFileSize(expanded0);
     if (expanded0.size() > c->inputs_[0].size() &&
-        inputs1_size + expanded0_size < kExpandedCompactionByteSizeLimit) {
+        inputs1_size + expanded0_size < kExpandedCompactionByteSizeLimit) { // 判断是否在阈值之内
       InternalKey new_start, new_limit;
+      // 获取level层新的[new_start,new_limit]
       GetRange(expanded0, &new_start, &new_limit);
       std::vector<FileMetaData*> expanded1;
+      // 通过level层新的[new_start,new_limit]，获取level+1层的文件集合
       current_->GetOverlappingInputs(level+1, &new_start, &new_limit,
                                      &expanded1);
+      // 判断level+1层的文件是否有变化                                     
       if (expanded1.size() == c->inputs_[1].size()) {
         Log(options_->info_log,
             "Expanding@%d %d+%d (%ld+%ld bytes) to %d+%d (%ld+%ld bytes)\n",
@@ -1418,8 +1441,10 @@ void VersionSet::SetupOtherInputs(Compaction* c) {
             long(expanded0_size), long(inputs1_size));
         smallest = new_start;
         largest = new_limit;
+        // 更新level层和level+1层的输入文件集合
         c->inputs_[0] = expanded0;
         c->inputs_[1] = expanded1;
+        // 更新all_start和all_limit
         GetRange2(c->inputs_[0], c->inputs_[1], &all_start, &all_limit);
       }
     }
@@ -1428,6 +1453,7 @@ void VersionSet::SetupOtherInputs(Compaction* c) {
   // Compute the set of grandparent files that overlap this compaction
   // (parent == level+1; grandparent == level+2)
   if (level + 2 < config::kNumLevels) {
+    // 计算level+2层，跟[all_start,all_limit]重合的文件集合并保存到grandparents_
     current_->GetOverlappingInputs(level + 2, &all_start, &all_limit,
                                    &c->grandparents_);
   }
@@ -1443,10 +1469,12 @@ void VersionSet::SetupOtherInputs(Compaction* c) {
   // We update this immediately instead of waiting for the VersionEdit
   // to be applied so that if the compaction fails, we will try a different
   // key range next time.
+  // 保存本次压缩的文件最大key到compact_pointer_[level],下次如果同一level要compact可以在这个key之后继续
   compact_pointer_[level] = largest.Encode().ToString();
   c->edit_.SetCompactPointer(level, largest);
 }
 
+// 主要用于手动触发压缩,可以指定level和key范围
 Compaction* VersionSet::CompactRange(
     int level,
     const InternalKey* begin,
@@ -1461,6 +1489,7 @@ Compaction* VersionSet::CompactRange(
   // But we cannot do this for level-0 since level-0 files can overlap
   // and we must not pick one file and drop another older file if the
   // two files overlap.
+  // 虽然参数可以指定范围，但是这里还是需要限制非0层文件参与压缩的文件大小(0层文件本身不多，而且有重叠，可以不限制)
   if (level > 0) {
     const uint64_t limit = MaxFileSizeForLevel(level);
     uint64_t total = 0;
@@ -1492,7 +1521,7 @@ Compaction::Compaction(int level)
   for (int i = 0; i < config::kNumLevels; i++) {
     level_ptrs_[i] = 0;
   }
-}
+} 
 
 Compaction::~Compaction() {
   if (input_version_ != NULL) {
@@ -1500,15 +1529,17 @@ Compaction::~Compaction() {
   }
 }
 
+// 是否直接移动到上一层
 bool Compaction::IsTrivialMove() const {
   // Avoid a move if there is lots of overlapping grandparent data.
   // Otherwise, the move could create a parent file that will require
   // a very expensive merge later on.
-  return (num_input_files(0) == 1 &&
-          num_input_files(1) == 0 &&
-          TotalFileSize(grandparents_) <= kMaxGrandParentOverlapBytes);
+  return (num_input_files(0) == 1 &&  // 1.level层只有1个文件
+          num_input_files(1) == 0 &&  // 2.level层和level+1层没有重叠，也就是level+1层没有选择到文件
+          TotalFileSize(grandparents_) <= kMaxGrandParentOverlapBytes); // 3.level+2层大小小于阈值
 }
 
+// 将inputs将要合并的文件加入到edit的删除文件列表
 void Compaction::AddInputDeletions(VersionEdit* edit) {
   for (int which = 0; which < 2; which++) {
     for (size_t i = 0; i < inputs_[which].size(); i++) {
@@ -1517,30 +1548,42 @@ void Compaction::AddInputDeletions(VersionEdit* edit) {
   }
 }
 
+// 判断user_key有没可能在level+2层以上，如果没有可能，当时执行type=delete的key操作时候，就直接忽略改操作了.
+// 如果不可能在level+2以上层出现，函数返回false，表示当前compact层不是key的baselevel
 bool Compaction::IsBaseLevelForKey(const Slice& user_key) {
   // Maybe use binary search to find right entry instead of linear search?
   const Comparator* user_cmp = input_version_->vset_->icmp_.user_comparator();
+  // 遍历>=level+2层的所有层
   for (int lvl = level_ + 2; lvl < config::kNumLevels; lvl++) {
+    // 从当前版本中获取对应lvl层的所有文件集合
     const std::vector<FileMetaData*>& files = input_version_->files_[lvl];
     for (; level_ptrs_[lvl] < files.size(); ) {
-      FileMetaData* f = files[level_ptrs_[lvl]];
+      FileMetaData* f = files[level_ptrs_[lvl]]; // level_ptrs_[lvl] 初始值为 0, 所以f初始为 input_version_->files_[lvl][0]
+
+      // 分支: user_key <= f->largest.user_key()
       if (user_cmp->Compare(user_key, f->largest.user_key()) <= 0) {
         // We've advanced far enough
         if (user_cmp->Compare(user_key, f->smallest.user_key()) >= 0) {
           // Key falls in this file's range, so definitely not base level
+          // user_key 在该文件的[samllest,largest]区间内，也就是可能存在了(虽然不是100%)，则返回false
           return false;
         }
         break;
       }
-      level_ptrs_[lvl]++;
+
+      // 分支: user_key > f->largest.user_key()
+      level_ptrs_[lvl]++; // 记录lvl层所有 user_key > largest的文件数量
     }
   }
-  return true;
+  return true; // 如果没有key区间与user_key重合的文件，返回true，表示当前是该user_key的BaseLevel
 }
 
+// 避免合并到level+1层，与level+2重叠比较多，下一次合并level+1层比较耗时
+// 所以，可以及时停止 TODO:
 bool Compaction::ShouldStopBefore(const Slice& internal_key) {
   // Scan to find earliest grandparent file that contains key.
   const InternalKeyComparator* icmp = &input_version_->vset_->icmp_;
+  // 遍历grandparents_查找internal_key <= SST.largest的第1个文件
   while (grandparent_index_ < grandparents_.size() &&
       icmp->Compare(internal_key,
                     grandparents_[grandparent_index_]->largest.Encode()) > 0) {
@@ -1551,6 +1594,7 @@ bool Compaction::ShouldStopBefore(const Slice& internal_key) {
   }
   seen_key_ = true;
 
+  // 如果与level+2层重叠的文件超过阈值，返回停止true
   if (overlapped_bytes_ > kMaxGrandParentOverlapBytes) {
     // Too much overlap for current output; start new output
     overlapped_bytes_ = 0;

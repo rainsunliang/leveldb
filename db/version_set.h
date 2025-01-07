@@ -274,6 +274,7 @@ class VersionSet {
   // 判断是否需要压缩
   bool NeedsCompaction() const {
     Version* v = current_;
+    // 两个条件会触发： 1.分数(每层文件大小/该成文件最大大小) 2.seek次数用完(v->file_to_compact_会被赋值为待commpat的file元数据)
     return (v->compaction_score_ >= 1) || (v->file_to_compact_ != NULL);
   }
 
@@ -345,6 +346,7 @@ class VersionSet {
 
   // Per-level key at which the next compaction at that level should start.
   // Either an empty string, or a valid InternalKey.
+  // 保存每个level当前压缩的最后key，下次压缩的这个level的时候，就选择比这个key大的文件开始压缩
   std::string compact_pointer_[config::kNumLevels];
 
   // No copying allowed
@@ -400,16 +402,22 @@ class Compaction {
 
   explicit Compaction(int level);
 
+  // 需要压缩的层
   int level_;
+  // 压缩之后最大的文件大小，等于options->max_file_size
   uint64_t max_output_file_size_;
+  // 当前操作的版本
   Version* input_version_;
+  // 当期操作生成的变更(主要会edit_.SetCompactPointer设置每个level compact的最大的key)
   VersionEdit edit_;
 
   // Each compaction reads inputs from "level_" and "level_+1"
+  // commpation的输入文件：inputs_[0]表示level层，inputs_[1]表示level+1层
   std::vector<FileMetaData*> inputs_[2];      // The two sets of inputs
 
   // State used to check for number of of overlapping grandparent files
   // (parent == level_ + 1, grandparent == level_ + 2)
+  // 保存level+2层与(level和level+1)两层文件有key重复的文件集合
   std::vector<FileMetaData*> grandparents_;
   size_t grandparent_index_;  // Index in grandparent_starts_
   bool seen_key_;             // Some output key has been seen
@@ -422,6 +430,7 @@ class Compaction {
   // is that we are positioned at one of the file ranges for each
   // higher level than the ones involved in this compaction (i.e. for
   // all L >= level_ + 2).
+  // 记录 >= level+2层，各层largest < user_key的文件的数量 (详细请看函数　IsBaseLevelForKey)
   size_t level_ptrs_[config::kNumLevels];
 };
 

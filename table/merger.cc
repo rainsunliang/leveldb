@@ -50,12 +50,15 @@ class MergingIterator : public Iterator {
 
   virtual void Seek(const Slice& target) {
     for (int i = 0; i < n_; i++) {
+      // 每个迭代器都seek到target
       children_[i].Seek(target);
     }
+    // 设置current_为当前最小的迭代器
     FindSmallest();
     direction_ = kForward;
   }
 
+  // 向前遍历的时候，取下一个entry
   virtual void Next() {
     assert(Valid());
 
@@ -64,6 +67,8 @@ class MergingIterator : public Iterator {
     // true for all of the non-current_ children since current_ is
     // the smallest child and key() == current_->key().  Otherwise,
     // we explicitly position the non-current_ children.
+    // 1.需要确保所有大于当前key的都排在后面
+    // 2.如果原来方向是往后的这个时候current指向的是FindLargest()的key,需要处理成满足第1点的要求
     if (direction_ != kForward) {
       for (int i = 0; i < n_; i++) {
         IteratorWrapper* child = &children_[i];
@@ -75,6 +80,7 @@ class MergingIterator : public Iterator {
           }
         }
       }
+      // next用于先前遍历，修正方向
       direction_ = kForward;
     }
 
@@ -133,18 +139,19 @@ class MergingIterator : public Iterator {
   }
 
  private:
-  void FindSmallest();
-  void FindLargest();
+  void FindSmallest(); // 在children_数组中查找最小的迭代器，并设置到current_中
+  void FindLargest();  // 在children_数组中查找最大的迭代器，并设置到current_中
 
   // We might want to use a heap in case there are lots of children.
   // For now we use a simple array since we expect a very small number
   // of children in leveldb.
   const Comparator* comparator_;
-  IteratorWrapper* children_;
+  IteratorWrapper* children_; // 数组，有多个迭代器
   int n_;
   IteratorWrapper* current_;
 
   // Which direction is the iterator moving?
+  // 方向：向前或者向后
   enum Direction {
     kForward,
     kReverse

@@ -53,7 +53,7 @@ class VersionEdit {
     has_last_sequence_ = true;
     last_sequence_ = seq;
   }
-  // TODO: compation为什么是level和一个key就可以了
+  // key 为compact时候的key范围的最大值
   void SetCompactPointer(int level, const InternalKey& key) {
     compact_pointers_.push_back(std::make_pair(level, key));
   }
@@ -104,7 +104,7 @@ class VersionEdit {
   bool has_next_file_number_;
   bool has_last_sequence_;
 
-  // compaction记录信息
+  // compaction记录信息,每个层级compact的最大key(下一次同样的level compact可以从这个key后面开始compact)
   std::vector< std::pair<int/*level*/, InternalKey> > compact_pointers_;
   // 相对上一个version,需要删除的文件列表
   DeletedFileSet deleted_files_;

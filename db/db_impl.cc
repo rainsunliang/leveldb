@@ -455,12 +455,14 @@ Status DBImpl::RecoverLogFile(uint64_t log_number,
   return status;
 }
 
+// 写0层文件到第X层，并将新增的文件记录到edit中
 Status DBImpl::WriteLevel0Table(MemTable* mem, VersionEdit* edit,
                                 Version* base) {
   mutex_.AssertHeld();
   const uint64_t start_micros = env_->NowMicros();
   FileMetaData meta;
   meta.number = versions_->NewFileNumber();
+  // 记录当前正在写入的文件编号
   pending_outputs_.insert(meta.number);
   Iterator* iter = mem->NewIterator();
   Log(options_.info_log, "Level-0 table #%llu: started",
@@ -469,7 +471,7 @@ Status DBImpl::WriteLevel0Table(MemTable* mem, VersionEdit* edit,
   Status s;
   {
     mutex_.Unlock();
-    // 写文件
+    // 将内存table写到文件
     s = BuildTable(dbname_, env_, options_, table_cache_, iter, &meta);
     mutex_.Lock();
   }
@@ -484,17 +486,21 @@ Status DBImpl::WriteLevel0Table(MemTable* mem, VersionEdit* edit,
 
   // Note that if file_size is zero, the file has been deleted and
   // should not be added to the manifest.
+  // 如果文件大小为0，不要增加到mainfest文件中
   int level = 0;
   if (s.ok() && meta.file_size > 0) {
     const Slice min_user_key = meta.smallest.user_key();
     const Slice max_user_key = meta.largest.user_key();
     if (base != NULL) {
+      // 选择0层的文件直接写到哪层
       level = base->PickLevelForMemTableOutput(min_user_key, max_user_key);
     }
+    // 将对应的层号和文件信息记录到VersionEdit中
     edit->AddFile(level, meta.number, meta.file_size,
                   meta.smallest, meta.largest);
   }
 
+  // 统计信息
   CompactionStats stats;
   stats.micros = env_->NowMicros() - start_micros;
   stats.bytes_written = meta.file_size;

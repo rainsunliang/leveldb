@@ -535,7 +535,7 @@ bool Version::OverlapInLevel(int level,
   // 选择内存table要写到哪一层
   // dump 0层的时候，尽量选择一个level大的层，选择到level+1层的机制如下：
   // 1.跟0层不能有重叠
-  // 2. 选择到level+1层，不能跟level+1层有重叠
+  // 2. 选择到level+1层，不能跟level层有重叠
   // 3. 选择到level+1层，不能跟level+2层的文件重叠很大(超过20M)，就会导致大量的compact。
   // 4. 最大返回 level 2，避免key在太多的层，有空间浪费，比如key1推到了第7层，下一次更新被推到了第5层，下下次更新被推到了第3层，也就是key1会重复有多个版本，占用空间
 int Version::PickLevelForMemTableOutput(

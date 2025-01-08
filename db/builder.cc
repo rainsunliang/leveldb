@@ -14,6 +14,7 @@
 
 namespace leveldb {
 
+// 写memtable到磁盘
 Status BuildTable(const std::string& dbname,
                   Env* env,
                   const Options& options,

@@ -31,6 +31,8 @@ static const int64_t kMaxGrandParentOverlapBytes = 10 * kTargetFileSize; // 20MB
 // total compaction cover more than this many bytes.
 static const int64_t kExpandedCompactionByteSizeLimit = 25 * kTargetFileSize;
 
+
+// 非0每层文件大小：level * 10MB, 最大高层不限制
 static double MaxBytesForLevel(int level) {
   // Note: the result for level zero is not really used since we set
   // the level-0 compaction threshold based on number of files.
@@ -571,6 +573,7 @@ int Version::PickLevelForMemTableOutput(
 }
 
 // Store in "*inputs" all files in "level" that overlap [begin,end]
+// 获取指定层，与[begin, end]有重叠的SST列表，通过参数inputs返回
 void Version::GetOverlappingInputs(
     int level,
     const InternalKey* begin,
@@ -774,6 +777,7 @@ class VersionSet::Builder {
   }
 
   // Save the current state in *v.
+  // 将当前状态(合并base、增加、删除的文件)保存到版本v中
   void SaveTo(Version* v) {
     BySmallestKey cmp;
     cmp.internal_comparator = &vset_->icmp_;
@@ -891,6 +895,7 @@ void VersionSet::AppendVersion(Version* v) {
   v->next_->prev_ = v;
 }
 
+// 生效一个版本Version
 Status VersionSet::LogAndApply(VersionEdit* edit, port::Mutex* mu) {
   if (edit->has_log_number_) {
     assert(edit->log_number_ >= log_number_);
@@ -913,12 +918,15 @@ Status VersionSet::LogAndApply(VersionEdit* edit, port::Mutex* mu) {
     // 将变更edit应用到current version
     builder.Apply(edit);
     // 生成一个新的版本v
-    builder.SaveTo(v);
+    builder.saveTo(v);
   }
+
+  // 计算分数，得到一个最应该compat的层
   Finalize(v);
 
   // Initialize new descriptor log file if necessary by creating
   // a temporary file that contains a snapshot of the current version.
+  // 初始化一个新的描述符，包括当前版本的快照
   std::string new_manifest_file;
   Status s;
   if (descriptor_log_ == NULL) {
@@ -942,8 +950,10 @@ Status VersionSet::LogAndApply(VersionEdit* edit, port::Mutex* mu) {
     if (s.ok()) {
       std::string record;
       edit->EncodeTo(&record);
+      // 写新的纪录到MAINFEST日志
       s = descriptor_log_->AddRecord(record);
       if (s.ok()) {
+        // 写磁盘
         s = descriptor_file_->Sync();
       }
       if (!s.ok()) {
@@ -953,6 +963,7 @@ Status VersionSet::LogAndApply(VersionEdit* edit, port::Mutex* mu) {
 
     // If we just created a new descriptor file, install it by writing a
     // new CURRENT file that points to it.
+    // 更新CURRENT
     if (s.ok() && !new_manifest_file.empty()) {
       s = SetCurrentFile(env_, dbname_, manifest_file_number_);
     }
@@ -988,6 +999,7 @@ Status VersionSet::Recover() {
   };
 
   // Read "CURRENT" file, which contains a pointer to the current manifest file
+  // 先读CURRENT文件
   std::string current;
   Status s = ReadFileToString(env_, CurrentFileName(dbname_), &current);
   if (!s.ok()) {
@@ -1021,8 +1033,10 @@ Status VersionSet::Recover() {
     log::Reader reader(file, &reporter, true/*checksum*/, 0/*initial_offset*/);
     Slice record;
     std::string scratch;
+    // 逐个读取VersionEdit
     while (reader.ReadRecord(&record, &scratch) && s.ok()) {
       VersionEdit edit;
+      // 解码VersionEdit
       s = edit.DecodeFrom(record);
       if (s.ok()) {
         if (edit.has_comparator_ &&
@@ -1034,6 +1048,7 @@ Status VersionSet::Recover() {
       }
 
       if (s.ok()) {
+        // 应用VersionEdit
         builder.Apply(&edit);
       }
 
@@ -1080,9 +1095,12 @@ Status VersionSet::Recover() {
 
   if (s.ok()) {
     Version* v = new Version(this);
+    // 新建当前版本v
     builder.SaveTo(v);
     // Install recovered version
+    // 计算版本v每层的分数用于后续compact优先使用
     Finalize(v);
+    // 安装(即VersionSet双向链表中添加)恢复版本
     AppendVersion(v);
     manifest_file_number_ = next_file;
     next_file_number_ = next_file + 1;
@@ -1100,6 +1118,7 @@ void VersionSet::MarkFileNumberUsed(uint64_t number) {
   }
 }
 
+// 计算每一层分数，优先compact
 void VersionSet::Finalize(Version* v) {
   // Precomputed best level for next compaction
   int best_level = -1;
@@ -1119,14 +1138,18 @@ void VersionSet::Finalize(Version* v) {
       // file size is small (perhaps because of a small write-buffer
       // setting, or very high compression ratios, or lots of
       // overwrites/deletions).
+      // 0 层的分数计算方式：0层文件个数/0层最大文件数(4个)
       score = v->files_[level].size() /
           static_cast<double>(config::kL0_CompactionTrigger);
     } else {
       // Compute the ratio of current size to size limit.
+      // 非0每层文件大小：level * 10MB, 最大高层不限制
       const uint64_t level_bytes = TotalFileSize(v->files_[level]);
+      // 非0层分数计算方式： 当前层文件大小/当前层最大文件大小
       score = static_cast<double>(level_bytes) / MaxBytesForLevel(level);
     }
 
+    // 保存得分最高的level和对应的分数
     if (score > best_score) {
       best_level = level;
       best_score = score;
@@ -1194,9 +1217,13 @@ uint64_t VersionSet::ApproximateOffsetOf(Version* v, const InternalKey& ikey) {
     const std::vector<FileMetaData*>& files = v->files_[level];
     for (size_t i = 0; i < files.size(); i++) {
       if (icmp_.Compare(files[i]->largest, ikey) <= 0) {
+        // 如果SST的最大key都比目标key小，那肯定不在这个文件
         // Entire file is before "ikey", so just add the file size
         result += files[i]->file_size;
       } else if (icmp_.Compare(files[i]->smallest, ikey) > 0) {
+        // 如果SST的最小key都比目标key大，那么整个SST文件都在key后面；
+        // 如果是0层，忽略该文件，继续下一个文件
+        // 如果是非0层，因为是有序的，所以 
         // Entire file is after "ikey", so ignore
         if (level > 0) {
           // Files other than level 0 are sorted by meta->smallest, so
@@ -1205,12 +1232,14 @@ uint64_t VersionSet::ApproximateOffsetOf(Version* v, const InternalKey& ikey) {
           break;
         }
       } else {
+        // 目标key在对应的SST文件key范围内
         // "ikey" falls in the range for this table.  Add the
         // approximate offset of "ikey" within the table.
         Table* tableptr;
         Iterator* iter = table_cache_->NewIterator(
             ReadOptions(), files[i]->number, files[i]->file_size, &tableptr);
         if (tableptr != NULL) {
+          // 调用table的估算函数
           result += tableptr->ApproximateOffsetOf(ikey.Encode());
         }
         delete iter;
@@ -1220,13 +1249,18 @@ uint64_t VersionSet::ApproximateOffsetOf(Version* v, const InternalKey& ikey) {
   return result;
 }
 
+// 通过参数set获取：VersionSet的所有版本的所有level的文件编号
 void VersionSet::AddLiveFiles(std::set<uint64_t>* live) {
+  // 遍历VersionSet里的所有版本
   for (Version* v = dummy_versions_.next_;
        v != &dummy_versions_;
        v = v->next_) {
+    // 遍历每个版本所有的level
     for (int level = 0; level < config::kNumLevels; level++) {
       const std::vector<FileMetaData*>& files = v->files_[level];
+      // 遍历每level的所有文件
       for (size_t i = 0; i < files.size(); i++) {
+        // 将文件编号插入Set集合 live中
         live->insert(files[i]->number);
       }
     }
@@ -1245,9 +1279,12 @@ int64_t VersionSet::MaxNextLevelOverlappingBytes() {
   for (int level = 1; level < config::kNumLevels - 1; level++) {
     for (size_t i = 0; i < current_->files_[level].size(); i++) {
       const FileMetaData* f = current_->files_[level][i];
+      // 每个文件f的区间和下一层level+1重叠的所有区间，通过overlaps返回
       current_->GetOverlappingInputs(level+1, &f->smallest, &f->largest,
                                      &overlaps);
+      // 计算所有文件大小总和
       const int64_t sum = TotalFileSize(overlaps);
+      // 记录最大值 
       if (sum > result) {
         result = sum;
       }
@@ -1301,6 +1338,7 @@ Iterator* VersionSet::MakeInputIterator(Compaction* c) {
   // Level-0 files have to be merged together.  For other levels,
   // we will make a concatenating iterator per level.
   // TODO(opt): use concatenating iterator for level-0 if there is no overlap
+  // 0层迭代器的数据是文件数的数量，非0层1个迭代器
   const int space = (c->level() == 0 ? c->inputs_[0].size() + 1 : 2);
   Iterator** list = new Iterator*[space];
   int num = 0;

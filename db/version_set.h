@@ -94,7 +94,7 @@ class Version {
   void Ref();
   void Unref();
 
-  // 获取指定层，与[begin, end]有重叠的SST列表
+  // 获取指定层，与[begin, end]有重叠的SST列表，通过参数inputs返回
   void GetOverlappingInputs(
       int level,
       const InternalKey* begin,         // NULL means before all keys
@@ -303,10 +303,12 @@ class VersionSet {
 
   void Finalize(Version* v);
 
+  // 从inputs传入的所有的STT文件的最小值和最大值中找出全局的最小和最大值
   void GetRange(const std::vector<FileMetaData*>& inputs,
                 InternalKey* smallest,
                 InternalKey* largest);
 
+  // 从inputs1和inputs2传入的所有的STT文件的最小值和最大值中找出全局的最小和最大值
   void GetRange2(const std::vector<FileMetaData*>& inputs1,
                  const std::vector<FileMetaData*>& inputs2,
                  InternalKey* smallest,
